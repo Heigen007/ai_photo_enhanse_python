@@ -5,13 +5,14 @@ import torch.optim as optim
 import torchvision.transforms as transforms
 from torch.utils.data import DataLoader, Dataset
 from PIL import Image
+import sys
 
 # Параметры
-IMAGE_DIR = "images"
+IMAGE_DIR = "unsplashPhotos"
 ENCODED_DIR = "encoded_images"
-BATCH_SIZE = 8
-EPOCHS = 50
-LEARNING_RATE = 0.001
+BATCH_SIZE = 32
+EPOCHS = 25
+LEARNING_RATE = 0.0003
 
 # Создание папки для сжатых представлений
 os.makedirs(ENCODED_DIR, exist_ok=True)
@@ -61,15 +62,15 @@ class Autoencoder(nn.Module):
     def __init__(self):
         super(Autoencoder, self).__init__()
         self.encoder = nn.Sequential(
-            nn.Conv2d(3, 32, kernel_size=3, stride=2, padding=1),  # 32 каналов вместо 64
+            nn.Conv2d(3, 32, kernel_size=3, stride=2, padding=1),
             nn.ReLU(),
-            nn.Conv2d(32, 64, kernel_size=3, stride=2, padding=1),  # 64 каналов вместо 256
+            nn.Conv2d(32, 64, kernel_size=3, stride=2, padding=1),
             nn.ReLU()
         )
         self.decoder = nn.Sequential(
-            nn.ConvTranspose2d(64, 32, kernel_size=3, stride=2, padding=1, output_padding=1),  # 64 → 32
+            nn.ConvTranspose2d(64, 32, kernel_size=3, stride=2, padding=1, output_padding=1),
             nn.ReLU(),
-            nn.ConvTranspose2d(32, 3, kernel_size=3, stride=2, padding=1, output_padding=1),  # 32 → 3
+            nn.ConvTranspose2d(32, 3, kernel_size=3, stride=2, padding=1, output_padding=1),
             nn.Sigmoid()
         )
 
@@ -96,17 +97,24 @@ def train_model():
     print("Начинаем обучение модели...")
     for epoch in range(EPOCHS):
         total_loss = 0
-        for images, _, _ in dataloader:  # Теперь используется измененный датасет
+        num_batches = len(dataloader)
+        
+        for batch_idx, (images, _, _) in enumerate(dataloader):
             optimizer.zero_grad()
             encoded, outputs = model(images)
             loss = criterion(outputs, images)
             loss.backward()
             optimizer.step()
             total_loss += loss.item()
-        print(f"Epoch [{epoch+1}/{EPOCHS}], Loss: {total_loss / len(dataloader):.4f}")
+            
+            # Обновление статуса во время эпохи
+            progress = (batch_idx + 1) / num_batches * 100
+            sys.stdout.write(f"\rEpoch [{epoch+1}/{EPOCHS}] | Batch [{batch_idx+1}/{num_batches}] | Progress: {progress:.2f}%")
+            sys.stdout.flush()
+        
+        print(f" | Loss: {total_loss / len(dataloader):.4f}")
     
     # Сохранение модели
-    encoded = encoded.to(dtype=torch.bfloat16)
     torch.save(model.state_dict(), "autoencoder.pth")
     print("Модель автоэнкодера сохранена!")
 
