@@ -1,4 +1,5 @@
 import os
+import time
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -97,6 +98,7 @@ def train_model():
     model = load_model()
     criterion = nn.MSELoss()
     optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE)
+    start_time = time.time()
 
     print("Начинаем обучение модели...")
     for epoch in range(EPOCHS):
@@ -120,7 +122,10 @@ def train_model():
 
     # Сохранение модели
     torch.save(model.state_dict(), "autoencoder.pth")
+    end_time = time.time()
+    elapsed_time = end_time - start_time
     print("Модель автоэнкодера сохранена!")
+    print(f"Обучение завершено за {elapsed_time:.2f} секунд ({elapsed_time / 60:.2f} минут)")
 
 if __name__ == "__main__":
     train_model()
