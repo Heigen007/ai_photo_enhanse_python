@@ -12,8 +12,8 @@ IMAGE_DIR = "unsplashPhotos"
 ENCODED_DIR = "encoded_images"
 BATCH_SIZE = 32
 EPOCHS = 25
-LEARNING_RATE = 0.0003
-
+LEARNING_RATE = 0.0001
+DATASET_SIZE = 2000
 # Создание папки для сжатых представлений
 os.makedirs(ENCODED_DIR, exist_ok=True)
 
@@ -45,13 +45,14 @@ class ImageDataset(Dataset):
 
         if self.transform:
             image = self.transform(image)
-        
+
         return image, img_path, orig_size  # Передаем оригинальный размер
 
 # ✅ Исправленная трансформация
 transform = transforms.Compose([
-    transforms.Resize(256, interpolation=Image.LANCZOS),  # Изменяем размер, но пропорции уже сохранены
-    transforms.ToTensor()
+    transforms.Resize(256, interpolation=Image.LANCZOS),
+    transforms.ToTensor(),
+    transforms.Normalize(mean=[0.0, 0.0, 0.0], std=[1.0, 1.0, 1.0])  # Приводим в [-1,1]
 ])
 
 dataset = ImageDataset(IMAGE_DIR, transform)
@@ -62,16 +63,19 @@ class Autoencoder(nn.Module):
     def __init__(self):
         super(Autoencoder, self).__init__()
         self.encoder = nn.Sequential(
-            nn.Conv2d(3, 32, kernel_size=3, stride=2, padding=1),
+            nn.Conv2d(3, 64, kernel_size=3, stride=2, padding=1),
+            nn.BatchNorm2d(64),  # Добавляем нормализацию
             nn.ReLU(),
-            nn.Conv2d(32, 64, kernel_size=3, stride=2, padding=1),
+            nn.Conv2d(64, 128, kernel_size=3, stride=2, padding=1),
+            nn.BatchNorm2d(128),
             nn.ReLU()
         )
+
         self.decoder = nn.Sequential(
-            nn.ConvTranspose2d(64, 32, kernel_size=3, stride=2, padding=1, output_padding=1),
+            nn.ConvTranspose2d(128, 64, kernel_size=3, stride=2, padding=1, output_padding=1),
             nn.ReLU(),
-            nn.ConvTranspose2d(32, 3, kernel_size=3, stride=2, padding=1, output_padding=1),
-            nn.Sigmoid()
+            nn.ConvTranspose2d(64, 3, kernel_size=3, stride=2, padding=1, output_padding=1),
+            nn.Tanh()
         )
 
     def forward(self, x):
@@ -93,12 +97,12 @@ def train_model():
     model = load_model()
     criterion = nn.MSELoss()
     optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE)
-    
+
     print("Начинаем обучение модели...")
     for epoch in range(EPOCHS):
         total_loss = 0
         num_batches = len(dataloader)
-        
+
         for batch_idx, (images, _, _) in enumerate(dataloader):
             optimizer.zero_grad()
             encoded, outputs = model(images)
@@ -106,14 +110,14 @@ def train_model():
             loss.backward()
             optimizer.step()
             total_loss += loss.item()
-            
+
             # Обновление статуса во время эпохи
             progress = (batch_idx + 1) / num_batches * 100
             sys.stdout.write(f"\rEpoch [{epoch+1}/{EPOCHS}] | Batch [{batch_idx+1}/{num_batches}] | Progress: {progress:.2f}%")
             sys.stdout.flush()
-        
+
         print(f" | Loss: {total_loss / len(dataloader):.4f}")
-    
+
     # Сохранение модели
     torch.save(model.state_dict(), "autoencoder.pth")
     print("Модель автоэнкодера сохранена!")
