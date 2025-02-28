@@ -1,4 +1,5 @@
 import os
+import time
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -9,9 +10,10 @@ from PIL import Image
 # Параметры
 IMAGE_DIR = "images"
 ENCODED_DIR = "encoded_images"
-BATCH_SIZE = 8
-EPOCHS = 50
-LEARNING_RATE = 0.001
+BATCH_SIZE = 32
+EPOCHS = 30
+LEARNING_RATE = 0.0001
+DATASET_SIZE = 52000
 
 # Создание папки для сжатых представлений
 os.makedirs(ENCODED_DIR, exist_ok=True)
@@ -79,21 +81,41 @@ def train_model():
     model = load_model()
     criterion = nn.MSELoss()
     optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE)
+
+    # Засекаем время начала обучения
+    start_time = time.time()
     
     print("Начинаем обучение модели...")
     for epoch in range(EPOCHS):
         total_loss = 0
-        for images, _ in dataloader:
+        for batch_idx, (images, _) in enumerate(dataloader):
             optimizer.zero_grad()
             encoded, outputs = model(images)
             loss = criterion(outputs, images)
             loss.backward()
             optimizer.step()
             total_loss += loss.item()
-        print(f"Epoch [{epoch+1}/{EPOCHS}], Loss: {total_loss / len(dataloader):.4f}")
-    
+
+            # Промежуточный лог каждые 542 итераций
+            if batch_idx % 542 == 0:
+                print(f"Epoch [{epoch+1}/{EPOCHS}], Batch [{batch_idx}/{len(dataloader)}], Loss: {loss.item():.4f}")
+
+        avg_loss = total_loss / len(dataloader)
+        print(f"Epoch [{epoch+1}/{EPOCHS}] завершена, Средний Loss: {avg_loss:.4f}")
+
+        # Сохранение модели каждые 10 эпох
+        if (epoch + 1) % 10 == 0:
+            model_path = f"autoencoder_epoch_{epoch+1}.pth"
+            torch.save(model.state_dict(), model_path)
+            print(f"Модель сохранена: {model_path}")
+
     torch.save(model.state_dict(), "autoencoder.pth")
-    print("Модель автоэнкодера сохранена!")
+    print("Финальная модель автоэнкодера сохранена!")
+
+    # Засекаем время окончания и вычисляем, сколько минут прошло
+    end_time = time.time()
+    elapsed_time = (end_time - start_time) / 60  # Перевод в минуты
+    print(f"Обучение завершено за {elapsed_time:.2f} минут.")
 
 if __name__ == "__main__":
     train_model()
