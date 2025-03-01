@@ -11,7 +11,7 @@ from skimage.metrics import structural_similarity as ssim
 os.makedirs("compressed_images", exist_ok=True)
 
 # Параметры
-IMAGE_DIR = "images"  # Папка с изображениями
+IMAGE_DIR = "testImages"  # Папка с изображениями
 OUTPUT_DIR = "compressed_images"  # Где сохраняем результаты
 RESULTS_FILE = "jpeg_webp_results.csv"  # Файл для сохранения результатов
 

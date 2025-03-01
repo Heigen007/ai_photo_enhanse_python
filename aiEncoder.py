@@ -10,15 +10,13 @@ from PIL import Image
 # Параметры
 IMAGE_DIR = "images"
 ENCODED_DIR = "encoded_images"
-BATCH_SIZE = 32
+BATCH_SIZE = 64
 EPOCHS = 30
 LEARNING_RATE = 0.0001
 DATASET_SIZE = 52000
 
-# Создание папки для сжатых представлений
 os.makedirs(ENCODED_DIR, exist_ok=True)
 
-# Функция загрузки изображений
 class ImageDataset(Dataset):
     def __init__(self, image_dir, transform=None):
         self.image_dir = image_dir
@@ -31,14 +29,13 @@ class ImageDataset(Dataset):
     def __getitem__(self, idx):
         img_path = os.path.join(self.image_dir, self.image_files[idx])
         image = Image.open(img_path).convert("RGB")
-        
         if self.transform:
             image = self.transform(image)
-        
         return image, img_path
 
-# Трансформация
+# Трансформация для 128x128
 transform = transforms.Compose([
+    transforms.Resize((128, 128), interpolation=Image.LANCZOS),  # Убеждаемся, что вход 128x128
     transforms.ToTensor()
 ])
 
@@ -50,15 +47,19 @@ class Autoencoder(nn.Module):
     def __init__(self):
         super(Autoencoder, self).__init__()
         self.encoder = nn.Sequential(
-            nn.Conv2d(3, 32, kernel_size=3, stride=2, padding=1),
+            nn.Conv2d(3, 16, kernel_size=3, stride=2, padding=1),  # 128x128 -> 64x64
             nn.ReLU(),
-            nn.Conv2d(32, 64, kernel_size=3, stride=2, padding=1),
+            nn.Conv2d(16, 32, kernel_size=3, stride=2, padding=1),  # 64x64 -> 32x32
+            nn.ReLU(),
+            nn.Conv2d(32, 32, kernel_size=3, stride=2, padding=1),  # 32x32 -> 16x16
             nn.ReLU()
         )
         self.decoder = nn.Sequential(
-            nn.ConvTranspose2d(64, 32, kernel_size=3, stride=2, padding=1, output_padding=1),
+            nn.ConvTranspose2d(32, 32, kernel_size=3, stride=2, padding=1, output_padding=1),  # 16x16 -> 32x32
             nn.ReLU(),
-            nn.ConvTranspose2d(32, 3, kernel_size=3, stride=2, padding=1, output_padding=1),
+            nn.ConvTranspose2d(32, 16, kernel_size=3, stride=2, padding=1, output_padding=1),  # 32x32 -> 64x64
+            nn.ReLU(),
+            nn.ConvTranspose2d(16, 3, kernel_size=3, stride=2, padding=1, output_padding=1),  # 64x64 -> 128x128
             nn.Sigmoid()
         )
 
@@ -67,7 +68,6 @@ class Autoencoder(nn.Module):
         decoded = self.decoder(encoded)
         return encoded, decoded
 
-# Функция загрузки модели
 def load_model():
     model = Autoencoder()
     if os.path.exists("autoencoder.pth"):
@@ -76,13 +76,10 @@ def load_model():
         print("Модель загружена.")
     return model
 
-# Основной запуск обучения
 def train_model():
     model = load_model()
     criterion = nn.MSELoss()
     optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE)
-
-    # Засекаем время начала обучения
     start_time = time.time()
     
     print("Начинаем обучение модели...")
@@ -96,14 +93,12 @@ def train_model():
             optimizer.step()
             total_loss += loss.item()
 
-            # Промежуточный лог каждые 542 итераций
             if batch_idx % 542 == 0:
                 print(f"Epoch [{epoch+1}/{EPOCHS}], Batch [{batch_idx}/{len(dataloader)}], Loss: {loss.item():.4f}")
 
         avg_loss = total_loss / len(dataloader)
         print(f"Epoch [{epoch+1}/{EPOCHS}] завершена, Средний Loss: {avg_loss:.4f}")
 
-        # Сохранение модели каждые 10 эпох
         if (epoch + 1) % 10 == 0:
             model_path = f"autoencoder_epoch_{epoch+1}.pth"
             torch.save(model.state_dict(), model_path)
@@ -111,11 +106,12 @@ def train_model():
 
     torch.save(model.state_dict(), "autoencoder.pth")
     print("Финальная модель автоэнкодера сохранена!")
-
-    # Засекаем время окончания и вычисляем, сколько минут прошло
     end_time = time.time()
-    elapsed_time = (end_time - start_time) / 60  # Перевод в минуты
+    elapsed_time = (end_time - start_time) / 60
     print(f"Обучение завершено за {elapsed_time:.2f} минут.")
 
 if __name__ == "__main__":
     train_model()
+
+
+# Средний Loss: 0.0005 для v1
