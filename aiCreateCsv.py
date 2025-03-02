@@ -3,9 +3,9 @@ import cv2
 import torch
 import torchvision.transforms as transforms
 import pandas as pd
+import lzma  # Новый алгоритм сжатия
 from PIL import Image
 from skimage.metrics import structural_similarity as ssim
-import gzip
 
 # Параметры
 IMAGE_DIR = "testImages"
@@ -46,17 +46,32 @@ with torch.no_grad():
         input_tensor = transform(image).unsqueeze(0)
         encoded, decoded = model(input_tensor)
 
-        # Сохранение сжатого представления с gzip
-        encoded_half = encoded.cpu().half()  # float16
-        encoded_path = os.path.join(ENCODED_DIR, f"{img_name}.pt.gz")
-        torch.save(encoded_half, encoded_path + ".tmp")  # Временный файл
+        # 1️⃣ FP16 → INT8 КВАНТОВАНИЕ
+        scale = encoded.abs().max()  # Определяем максимальное значение
+        encoded_int8 = (encoded / scale * 127).clamp(-128, 127).to(torch.int8)  # Нормализация в [-128, 127]
+
+        # 2️⃣ Сохранение INT8 + scale в LZMA
+        encoded_path = os.path.join(ENCODED_DIR, f"{img_name}.pt.xz")
+        torch.save((encoded_int8, scale), encoded_path + ".tmp")  # Сохраняем в .tmp
+
         with open(encoded_path + ".tmp", "rb") as f:
-            compressed_data = gzip.compress(f.read())
+            compressed_data = lzma.compress(f.read(), preset=9)  # Максимальное сжатие
         with open(encoded_path, "wb") as f:
             f.write(compressed_data)
         os.remove(encoded_path + ".tmp")
 
         compressed_size = os.path.getsize(encoded_path) / 1024  # Размер в КБ
+
+        # 3️⃣ Восстановление INT8 → FP16
+        with lzma.open(encoded_path, "rb") as f:
+            decompressed_data = f.read()
+        with open(encoded_path + ".tmp", "wb") as f:
+            f.write(decompressed_data)
+
+        encoded_int8_loaded, scale_loaded = torch.load(encoded_path + ".tmp")  # Загружаем INT8 + scale
+        print(scale_loaded)
+        encoded_fp16 = (encoded_int8_loaded.float() / 127) * scale_loaded  # Восстанавливаем FP16
+        os.remove(encoded_path + ".tmp")
 
         # Восстановление изображения
         decoded_image = transforms.ToPILImage()(decoded.squeeze().cpu().clamp(0, 1))
