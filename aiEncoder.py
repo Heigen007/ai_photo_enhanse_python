@@ -12,7 +12,7 @@ IMAGE_DIR = "images"
 ENCODED_DIR = "encoded_images"
 BATCH_SIZE = 64
 EPOCHS = 30
-LEARNING_RATE = 0.0002
+LEARNING_RATE = 0.0001
 DATASET_SIZE = 52000
 
 os.makedirs(ENCODED_DIR, exist_ok=True)
@@ -46,34 +46,36 @@ dataloader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=True)
 class Autoencoder(nn.Module):
     def __init__(self):
         super(Autoencoder, self).__init__()
-        self.encoder = nn.Sequential(
-            nn.Conv2d(3, 32, kernel_size=3, stride=2, padding=1),    # 128x128x3 -> 64x64x32
-            nn.ReLU(),
-            nn.Conv2d(32, 64, kernel_size=3, stride=2, padding=1),   # 64x64x32 -> 32x32x64
-            nn.ReLU(),
-            nn.Conv2d(64, 128, kernel_size=3, stride=2, padding=1),  # 32x32x64 -> 16x16x128
-            nn.ReLU(),
-            nn.Conv2d(128, 256, kernel_size=3, stride=2, padding=1), # 16x16x128 -> 8x8x256
-            nn.ReLU(),
-            nn.Conv2d(256, 64, kernel_size=3, stride=1, padding=1),  # 8x8x256 -> 8x8x64
-            nn.ReLU()
-        )
-        self.decoder = nn.Sequential(
-            nn.ConvTranspose2d(64, 256, kernel_size=3, stride=1, padding=1),          # 8x8x64 -> 8x8x256
-            nn.ReLU(),
-            nn.ConvTranspose2d(256, 128, kernel_size=3, stride=2, padding=1, output_padding=1), # 8x8x256 -> 16x16x128
-            nn.ReLU(),
-            nn.ConvTranspose2d(128, 64, kernel_size=3, stride=2, padding=1, output_padding=1),  # 16x16x128 -> 32x32x64
-            nn.ReLU(),
-            nn.ConvTranspose2d(64, 32, kernel_size=3, stride=2, padding=1, output_padding=1),   # 32x32x64 -> 64x64x32
-            nn.ReLU(),
-            nn.ConvTranspose2d(32, 3, kernel_size=3, stride=2, padding=1, output_padding=1),    # 64x64x32 -> 128x128x3
-            nn.Sigmoid()
-        )
+
+        # Encoder
+        self.enc1 = nn.Conv2d(3, 32, kernel_size=3, stride=2, padding=1)   # 128x128 -> 64x64
+        self.enc2 = nn.Conv2d(32, 64, kernel_size=3, stride=2, padding=1)  # 64x64 -> 32x32
+        self.enc3 = nn.Conv2d(64, 128, kernel_size=3, stride=2, padding=1) # 32x32 -> 16x16
+        self.enc4 = nn.Conv2d(128, 256, kernel_size=3, stride=2, padding=1) # 16x16 -> 8x8
+        self.enc5 = nn.Conv2d(256, 64, kernel_size=3, stride=1, padding=1) # 8x8 -> 8x8
+
+        # Decoder
+        self.dec1 = nn.ConvTranspose2d(64, 256, kernel_size=3, stride=1, padding=1)  
+        self.dec2 = nn.ConvTranspose2d(256, 128, kernel_size=3, stride=2, padding=1, output_padding=1)
+        self.dec3 = nn.ConvTranspose2d(128, 64, kernel_size=3, stride=2, padding=1, output_padding=1)
+        self.dec4 = nn.ConvTranspose2d(64, 32, kernel_size=3, stride=2, padding=1, output_padding=1)
+        self.dec5 = nn.ConvTranspose2d(32, 3, kernel_size=3, stride=2, padding=1, output_padding=1)
 
     def forward(self, x):
-        encoded = self.encoder(x)
-        decoded = self.decoder(encoded)
+        # Encoder
+        e1 = torch.relu(self.enc1(x))
+        e2 = torch.relu(self.enc2(e1))
+        e3 = torch.relu(self.enc3(e2))
+        e4 = torch.relu(self.enc4(e3))
+        encoded = torch.relu(self.enc5(e4))
+
+        # Decoder with skip connections
+        d1 = torch.relu(self.dec1(encoded) + e4) # 8x8
+        d2 = torch.relu(self.dec2(d1) + e3)      # 16x16
+        d3 = torch.relu(self.dec3(d2) + e2)      # 32x32
+        d4 = torch.relu(self.dec4(d3) + e1)      # 64x64
+        decoded = torch.sigmoid(self.dec5(d4))   # 128x128
+
         return encoded, decoded
 
 def load_model():
@@ -89,7 +91,7 @@ def train_model():
     criterion = nn.MSELoss()
     optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE)
     start_time = time.time()
-    
+
     print("Начинаем обучение модели...")
     for epoch in range(EPOCHS):
         total_loss = 0
@@ -125,3 +127,4 @@ if __name__ == "__main__":
 # Средний Loss: 0.0005 для v1 с 3 слоями
 # Средний Loss: 0.0026 для v2 с 3 слоями
 # Средний Loss: 0.0039 для v3 с 5 слоями
+# Средний Loss: 0.0007 для 1 гипотезы
