@@ -69,7 +69,6 @@ with torch.no_grad():
             f.write(decompressed_data)
 
         encoded_int8_loaded, scale_loaded = torch.load(encoded_path + ".tmp")  # Загружаем INT8 + scale
-        print(scale_loaded)
         encoded_fp16 = (encoded_int8_loaded.float() / 127) * scale_loaded  # Восстанавливаем FP16
         os.remove(encoded_path + ".tmp")
 
