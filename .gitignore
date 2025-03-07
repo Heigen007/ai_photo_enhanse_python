@@ -5,3 +5,4 @@ encoded_images
 images
 save
 testImages
+autoencoder.pth

@@ -8,12 +8,12 @@ from torch.utils.data import DataLoader, Dataset
 from PIL import Image
 
 # Параметры
-IMAGE_DIR = "images"
+IMAGE_DIR = "testImages"
 ENCODED_DIR = "encoded_images"
-BATCH_SIZE = 64
+BATCH_SIZE = 8  # Reduced due to larger image size (adjust based on your hardware)
 EPOCHS = 40
 LEARNING_RATE = 0.0001
-DATASET_SIZE = 52000
+DATASET_SIZE = 6000
 
 os.makedirs(ENCODED_DIR, exist_ok=True)
 
@@ -33,33 +33,35 @@ class ImageDataset(Dataset):
             image = self.transform(image)
         return image, img_path
 
-# Трансформация для 128x128
+# Трансформация для 1024x1024
 transform = transforms.Compose([
-    transforms.Resize((128, 128), interpolation=Image.LANCZOS),  # Убеждаемся, что вход 128x128
+    transforms.Resize((1024, 1024), interpolation=Image.LANCZOS),  # Убеждаемся, что вход 1024x1024
     transforms.ToTensor()
 ])
 
 dataset = ImageDataset(IMAGE_DIR, transform)
 dataloader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=True)
 
-# Определение автоэнкодера
+# Новая архитектура автоэнкодера
 class Autoencoder(nn.Module):
     def __init__(self):
         super(Autoencoder, self).__init__()
 
-        # Encoder
-        self.enc1 = nn.Conv2d(3, 32, kernel_size=3, stride=2, padding=1)   # 128x128 -> 64x64
-        self.enc2 = nn.Conv2d(32, 64, kernel_size=3, stride=2, padding=1)  # 64x64 -> 32x32
-        self.enc3 = nn.Conv2d(64, 128, kernel_size=3, stride=2, padding=1) # 32x32 -> 16x16
-        self.enc4 = nn.Conv2d(128, 256, kernel_size=3, stride=2, padding=1) # 16x16 -> 8x8
-        self.enc5 = nn.Conv2d(256, 64, kernel_size=3, stride=1, padding=1) # 8x8 -> 8x8
+        # Encoder (downsampling from 1024x1024 to 32x32 latent space)
+        self.enc1 = nn.Conv2d(3, 64, kernel_size=3, stride=2, padding=1)    # 1024x1024 -> 512x512
+        self.enc2 = nn.Conv2d(64, 128, kernel_size=3, stride=2, padding=1)  # 512x512 -> 256x256
+        self.enc3 = nn.Conv2d(128, 256, kernel_size=3, stride=2, padding=1) # 256x256 -> 128x128
+        self.enc4 = nn.Conv2d(256, 512, kernel_size=3, stride=2, padding=1) # 128x128 -> 64x64
+        self.enc5 = nn.Conv2d(512, 1024, kernel_size=3, stride=2, padding=1) # 64x64 -> 32x32
+        self.enc6 = nn.Conv2d(1024, 256, kernel_size=3, stride=1, padding=1) # 32x32 -> 32x32 (bottleneck)
 
-        # Decoder
-        self.dec1 = nn.ConvTranspose2d(64, 256, kernel_size=3, stride=1, padding=1)  
-        self.dec2 = nn.ConvTranspose2d(256, 128, kernel_size=3, stride=2, padding=1, output_padding=1)
-        self.dec3 = nn.ConvTranspose2d(128, 64, kernel_size=3, stride=2, padding=1, output_padding=1)
-        self.dec4 = nn.ConvTranspose2d(64, 32, kernel_size=3, stride=2, padding=1, output_padding=1)
-        self.dec5 = nn.ConvTranspose2d(32, 3, kernel_size=3, stride=2, padding=1, output_padding=1)
+        # Decoder (upsampling from 32x32 back to 1024x1024)
+        self.dec1 = nn.ConvTranspose2d(256, 1024, kernel_size=3, stride=1, padding=1)  # 32x32 -> 32x32
+        self.dec2 = nn.ConvTranspose2d(1024, 512, kernel_size=3, stride=2, padding=1, output_padding=1) # 32x32 -> 64x64
+        self.dec3 = nn.ConvTranspose2d(512, 256, kernel_size=3, stride=2, padding=1, output_padding=1) # 64x64 -> 128x128
+        self.dec4 = nn.ConvTranspose2d(256, 128, kernel_size=3, stride=2, padding=1, output_padding=1) # 128x128 -> 256x256
+        self.dec5 = nn.ConvTranspose2d(128, 64, kernel_size=3, stride=2, padding=1, output_padding=1)  # 256x256 -> 512x512
+        self.dec6 = nn.ConvTranspose2d(64, 3, kernel_size=3, stride=2, padding=1, output_padding=1)    # 512x512 -> 1024x1024
 
     def forward(self, x):
         # Encoder
@@ -67,14 +69,16 @@ class Autoencoder(nn.Module):
         e2 = torch.relu(self.enc2(e1))
         e3 = torch.relu(self.enc3(e2))
         e4 = torch.relu(self.enc4(e3))
-        encoded = torch.relu(self.enc5(e4))
+        e5 = torch.relu(self.enc5(e4))
+        encoded = torch.relu(self.enc6(e5))
 
         # Decoder with skip connections
-        d1 = torch.relu(self.dec1(encoded) + e4) # 8x8
-        d2 = torch.relu(self.dec2(d1) + e3)      # 16x16
-        d3 = torch.relu(self.dec3(d2) + e2)      # 32x32
-        d4 = torch.relu(self.dec4(d3) + e1)      # 64x64
-        decoded = torch.sigmoid(self.dec5(d4))   # 128x128
+        d1 = torch.relu(self.dec1(encoded) + e5)  # 32x32
+        d2 = torch.relu(self.dec2(d1) + e4)       # 64x64
+        d3 = torch.relu(self.dec3(d2) + e3)       # 128x128
+        d4 = torch.relu(self.dec4(d3) + e2)       # 256x256
+        d5 = torch.relu(self.dec5(d4) + e1)       # 512x512
+        decoded = torch.sigmoid(self.dec6(d5))    # 1024x1024
 
         return encoded, decoded
 
@@ -85,7 +89,6 @@ def load_model():
         model.load_state_dict(torch.load("autoencoder.pth", map_location=torch.device('cpu')))
         print("Модель загружена.")
     return model
-
 
 def train_model():
     model = load_model()
@@ -106,7 +109,7 @@ def train_model():
             optimizer.step()
             total_loss += loss.item()
 
-            if batch_idx % 204 == 0:
+            if batch_idx % 100 == 0:
                 print(f"Epoch [{epoch+1}/{EPOCHS}], Batch [{batch_idx}/{len(dataloader)}], Loss: {loss.item():.4f}")
 
         avg_loss = total_loss / len(dataloader)
@@ -126,7 +129,6 @@ def train_model():
     end_time = time.time()
     elapsed_time = (end_time - start_time) / 60
     print(f"Обучение завершено за {elapsed_time:.2f} минут.")
-
 
 if __name__ == "__main__":
     train_model()

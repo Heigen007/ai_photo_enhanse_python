@@ -20,19 +20,22 @@ os.makedirs(ENCODED_DIR, exist_ok=True)
 dataset = [f for f in os.listdir(IMAGE_DIR) if f.endswith(('jpg', 'png'))]
 
 def load_model():
-    from aiEncoder import Autoencoder  # Предполагается, что это существует
+    from aiEncoder import Autoencoder  # Импорт из вашего файла aiEncoder.py
     model = Autoencoder()
-    model.load_state_dict(torch.load("autoencoder.pth", map_location=torch.device('cpu')))
-    model.eval()
+    if os.path.exists("autoencoder.pth"):
+        print("Загружаем модель...")
+        model.load_state_dict(torch.load("autoencoder.pth", map_location=torch.device('cpu')))
+        model.eval()
+        print("Модель загружена.")
+    else:
+        raise FileNotFoundError("Модель autoencoder.pth не найдена. Пожалуйста, сначала обучите модель.")
     return model
-
-if not os.path.exists("autoencoder.pth"):
-    raise FileNotFoundError("Модель autoencoder.pth не найдена. Пожалуйста, сначала обучите модель.")
 
 model = load_model()
 
+# Трансформация для 1024x1024
 transform = transforms.Compose([
-    transforms.Resize((128, 128), interpolation=Image.LANCZOS),
+    transforms.Resize((1024, 1024), interpolation=Image.LANCZOS),
     transforms.ToTensor()
 ])
 
@@ -98,7 +101,7 @@ with torch.no_grad():
             decoded_image_cv = cv2.resize(decoded_image_cv, (original_image.shape[1], original_image.shape[0]))
 
         psnr = cv2.PSNR(original_image, decoded_image_cv)
-        ssim_value = ssim(original_image, decoded_image_cv, channel_axis=2, win_size=3)
+        ssim_value = ssim(original_image, decoded_image_cv, channel_axis=2, win_size=7)  # Увеличил win_size до 7 для 1024x1024
         original_size = os.path.getsize(img_path) / 1024
 
         results.append([img_name, "AI", psnr, ssim_value, original_size, compressed_size, compression_time, decompression_time])

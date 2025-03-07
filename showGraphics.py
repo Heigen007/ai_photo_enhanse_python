@@ -16,7 +16,7 @@ image_names = combined_results["Image"].unique()
 
 # Визуализация графиков
 plt.figure(figsize=(10, 5))
-for fmt in ["JPEG", "WebP", "AI"]:
+for fmt in ["JPEG", "AI"]:
     subset = combined_results[combined_results["Format"] == fmt]
     subset = subset.set_index("Image").reindex(image_names).reset_index()
     plt.plot(subset["Image"], subset["PSNR"], label=f"{fmt} PSNR", marker='o')
@@ -28,7 +28,7 @@ plt.legend()
 plt.show()
 
 plt.figure(figsize=(10, 5))
-for fmt in ["JPEG", "WebP", "AI"]:
+for fmt in ["JPEG", "AI"]:
     subset = combined_results[combined_results["Format"] == fmt]
     subset = subset.set_index("Image").reindex(image_names).reset_index()
     plt.plot(subset["Image"], subset["SSIM"], label=f"{fmt} SSIM", marker='o')
@@ -40,7 +40,7 @@ plt.legend()
 plt.show()
 
 plt.figure(figsize=(10, 5))
-for fmt in ["JPEG", "WebP", "AI"]:
+for fmt in ["JPEG", "AI"]:
     subset = combined_results[combined_results["Format"] == fmt]
     subset = subset.set_index("Image").reindex(image_names).reset_index()
     plt.plot(subset["Image"], subset["Compressed Size (KB)"], label=f"{fmt} Size", marker='o')
