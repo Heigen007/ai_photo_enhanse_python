@@ -8,12 +8,11 @@ from torch.utils.data import DataLoader, Dataset
 from PIL import Image
 
 # Параметры
-IMAGE_DIR = "testImages"
+IMAGE_DIR = "images"
 ENCODED_DIR = "encoded_images"
-BATCH_SIZE = 8  # Reduced due to larger image size (adjust based on your hardware)
-EPOCHS = 40
+BATCH_SIZE = 16
+EPOCHS = 30
 LEARNING_RATE = 0.0001
-DATASET_SIZE = 6000
 
 os.makedirs(ENCODED_DIR, exist_ok=True)
 
@@ -35,50 +34,107 @@ class ImageDataset(Dataset):
 
 # Трансформация для 1024x1024
 transform = transforms.Compose([
-    transforms.Resize((1024, 1024), interpolation=Image.LANCZOS),  # Убеждаемся, что вход 1024x1024
+    transforms.Resize((1024, 1024), interpolation=Image.LANCZOS),
     transforms.ToTensor()
 ])
 
 dataset = ImageDataset(IMAGE_DIR, transform)
 dataloader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=True)
 
-# Новая архитектура автоэнкодера
+# Улучшенная архитектура автоэнкодера
 class Autoencoder(nn.Module):
     def __init__(self):
         super(Autoencoder, self).__init__()
 
-        # Encoder (downsampling from 1024x1024 to 32x32 latent space)
-        self.enc1 = nn.Conv2d(3, 64, kernel_size=3, stride=2, padding=1)    # 1024x1024 -> 512x512
-        self.enc2 = nn.Conv2d(64, 128, kernel_size=3, stride=2, padding=1)  # 512x512 -> 256x256
-        self.enc3 = nn.Conv2d(128, 256, kernel_size=3, stride=2, padding=1) # 256x256 -> 128x128
-        self.enc4 = nn.Conv2d(256, 512, kernel_size=3, stride=2, padding=1) # 128x128 -> 64x64
-        self.enc5 = nn.Conv2d(512, 1024, kernel_size=3, stride=2, padding=1) # 64x64 -> 32x32
-        self.enc6 = nn.Conv2d(1024, 256, kernel_size=3, stride=1, padding=1) # 32x32 -> 32x32 (bottleneck)
+        # Encoder
+        self.enc1 = nn.Sequential(
+            nn.Conv2d(3, 64, kernel_size=3, stride=2, padding=1),
+            nn.BatchNorm2d(64),
+            nn.LeakyReLU(0.2)
+        )  # 1024x1024 -> 512x512
 
-        # Decoder (upsampling from 32x32 back to 1024x1024)
-        self.dec1 = nn.ConvTranspose2d(256, 1024, kernel_size=3, stride=1, padding=1)  # 32x32 -> 32x32
-        self.dec2 = nn.ConvTranspose2d(1024, 512, kernel_size=3, stride=2, padding=1, output_padding=1) # 32x32 -> 64x64
-        self.dec3 = nn.ConvTranspose2d(512, 256, kernel_size=3, stride=2, padding=1, output_padding=1) # 64x64 -> 128x128
-        self.dec4 = nn.ConvTranspose2d(256, 128, kernel_size=3, stride=2, padding=1, output_padding=1) # 128x128 -> 256x256
-        self.dec5 = nn.ConvTranspose2d(128, 64, kernel_size=3, stride=2, padding=1, output_padding=1)  # 256x256 -> 512x512
-        self.dec6 = nn.ConvTranspose2d(64, 3, kernel_size=3, stride=2, padding=1, output_padding=1)    # 512x512 -> 1024x1024
+        self.enc2 = nn.Sequential(
+            nn.Conv2d(64, 128, kernel_size=3, stride=2, padding=1),
+            nn.BatchNorm2d(128),
+            nn.LeakyReLU(0.2)
+        )  # 512x512 -> 256x256
+
+        self.enc3 = nn.Sequential(
+            nn.Conv2d(128, 256, kernel_size=3, stride=2, padding=1),
+            nn.BatchNorm2d(256),
+            nn.LeakyReLU(0.2)
+        )  # 256x256 -> 128x128
+
+        self.enc4 = nn.Sequential(
+            nn.Conv2d(256, 512, kernel_size=3, stride=2, padding=1),
+            nn.BatchNorm2d(512),
+            nn.LeakyReLU(0.2)
+        )  # 128x128 -> 64x64
+
+        self.enc5 = nn.Sequential(
+            nn.Conv2d(512, 1024, kernel_size=3, stride=2, padding=1),
+            nn.BatchNorm2d(1024),
+            nn.LeakyReLU(0.2)
+        )  # 64x64 -> 32x32
+
+        self.enc6 = nn.Sequential(
+            nn.Conv2d(1024, 256, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm2d(256),
+            nn.LeakyReLU(0.2)
+        )  # 32x32 -> 32x32 (bottleneck)
+
+        # Decoder
+        self.dec1 = nn.Sequential(
+            nn.ConvTranspose2d(256, 1024, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm2d(1024),
+            nn.LeakyReLU(0.2)
+        )  # 32x32 -> 32x32
+
+        self.dec2 = nn.Sequential(
+            nn.ConvTranspose2d(1024, 512, kernel_size=3, stride=2, padding=1, output_padding=1),
+            nn.BatchNorm2d(512),
+            nn.LeakyReLU(0.2)
+        )  # 32x32 -> 64x64
+
+        self.dec3 = nn.Sequential(
+            nn.ConvTranspose2d(512, 256, kernel_size=3, stride=2, padding=1, output_padding=1),
+            nn.BatchNorm2d(256),
+            nn.LeakyReLU(0.2)
+        )  # 64x64 -> 128x128
+
+        self.dec4 = nn.Sequential(
+            nn.ConvTranspose2d(256, 128, kernel_size=3, stride=2, padding=1, output_padding=1),
+            nn.BatchNorm2d(128),
+            nn.LeakyReLU(0.2)
+        )  # 128x128 -> 256x256
+
+        self.dec5 = nn.Sequential(
+            nn.ConvTranspose2d(128, 64, kernel_size=3, stride=2, padding=1, output_padding=1),
+            nn.BatchNorm2d(64),
+            nn.LeakyReLU(0.2)
+        )  # 256x256 -> 512x512
+
+        self.dec6 = nn.Sequential(
+            nn.ConvTranspose2d(64, 3, kernel_size=3, stride=2, padding=1, output_padding=1),
+            nn.Sigmoid()
+        )  # 512x512 -> 1024x1024
 
     def forward(self, x):
         # Encoder
-        e1 = torch.relu(self.enc1(x))
-        e2 = torch.relu(self.enc2(e1))
-        e3 = torch.relu(self.enc3(e2))
-        e4 = torch.relu(self.enc4(e3))
-        e5 = torch.relu(self.enc5(e4))
-        encoded = torch.relu(self.enc6(e5))
+        e1 = self.enc1(x)
+        e2 = self.enc2(e1)
+        e3 = self.enc3(e2)
+        e4 = self.enc4(e3)
+        e5 = self.enc5(e4)
+        encoded = self.enc6(e5)
 
-        # Decoder with skip connections
-        d1 = torch.relu(self.dec1(encoded) + e5)  # 32x32
-        d2 = torch.relu(self.dec2(d1) + e4)       # 64x64
-        d3 = torch.relu(self.dec3(d2) + e3)       # 128x128
-        d4 = torch.relu(self.dec4(d3) + e2)       # 256x256
-        d5 = torch.relu(self.dec5(d4) + e1)       # 512x512
-        decoded = torch.sigmoid(self.dec6(d5))    # 1024x1024
+        # Decoder (с Skip Connections)
+        d1 = self.dec1(encoded) + e5
+        d2 = self.dec2(d1) + e4
+        d3 = self.dec3(d2) + e3
+        d4 = self.dec4(d3) + e2
+        d5 = self.dec5(d4) + e1
+        decoded = self.dec6(d5)
 
         return encoded, decoded
 
@@ -94,9 +150,9 @@ def train_model():
     model = load_model()
     criterion = nn.MSELoss()
     optimizer = optim.AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=1e-4)
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=3)
-    start_time = time.time()
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=2)
 
+    start_time = time.time()
     print("Начинаем обучение модели...")
 
     for epoch in range(EPOCHS):
@@ -109,16 +165,15 @@ def train_model():
             optimizer.step()
             total_loss += loss.item()
 
-            if batch_idx % 100 == 0:
-                print(f"Epoch [{epoch+1}/{EPOCHS}], Batch [{batch_idx}/{len(dataloader)}], Loss: {loss.item():.4f}")
+            if batch_idx % 5 == 0:
+                print(f"Epoch [{epoch+1}/{EPOCHS}], Batch [{batch_idx}/{len(dataloader)}], Loss: {loss.item():.8f}")
 
         avg_loss = total_loss / len(dataloader)
-        print(f"Epoch [{epoch+1}/{EPOCHS}] завершена, Средний Loss: {avg_loss:.4f}")
+        print(f"Epoch [{epoch+1}/{EPOCHS}] завершена, Средний Loss: {avg_loss:.8f}")
 
-        # Шаг уменьшения скорости обучения
         scheduler.step(avg_loss)
 
-        if (epoch + 1) % 10 == 0:
+        if (epoch + 1) % 2 == 0:
             model_path = f"autoencoder_epoch_{epoch+1}.pth"
             torch.save(model.state_dict(), model_path)
             print(f"Модель сохранена: {model_path}")
@@ -126,12 +181,11 @@ def train_model():
     torch.save(model.state_dict(), "autoencoder.pth")
     print("Финальная модель автоэнкодера сохранена!")
 
-    end_time = time.time()
-    elapsed_time = (end_time - start_time) / 60
-    print(f"Обучение завершено за {elapsed_time:.2f} минут.")
+    print(f"Обучение завершено за {(time.time() - start_time) / 60:.2f} минут.")
 
 if __name__ == "__main__":
     train_model()
+
 
 # Средний Loss: 0.0005 для v1 с 3 слоями
 # Средний Loss: 0.0026 для v2 с 3 слоями
@@ -139,3 +193,13 @@ if __name__ == "__main__":
 # Средний Loss: 0.0007 для 1 гипотезы
 # Обучаем модель(добавляем гладкое снижение learning rate + добавляем эпохи)
 # Средний Loss: 0.0004 для 2 гипотезы
+
+# 1024x1024
+
+# 10 эпох - 0.0023 - 530 минут
+# +5 эпох - 0.0020 - 166 минут
+#+30 эпох - 0.0007 - 1115 минут
+# Итого: 1811 минута или 30 часов
+
+# Добавляем LeakyReLU + BatchNorm
+# 

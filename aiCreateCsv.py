@@ -12,7 +12,7 @@ from skimage.metrics import structural_similarity as ssim
 IMAGE_DIR = "testImages"
 OUTPUT_DIR = "compressed_images"
 ENCODED_DIR = "encoded_images"
-RESULTS_FILE = "ai_results_with_time.csv"
+RESULTS_FILE = "ai_results.csv"
 
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 os.makedirs(ENCODED_DIR, exist_ok=True)
