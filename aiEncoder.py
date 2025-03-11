@@ -165,7 +165,7 @@ def train_model():
             optimizer.step()
             total_loss += loss.item()
 
-            if batch_idx % 5 == 0:
+            if batch_idx % 10 == 0:
                 print(f"Epoch [{epoch+1}/{EPOCHS}], Batch [{batch_idx}/{len(dataloader)}], Loss: {loss.item():.8f}")
 
         avg_loss = total_loss / len(dataloader)
@@ -186,7 +186,6 @@ def train_model():
 if __name__ == "__main__":
     train_model()
 
-
 # Средний Loss: 0.0005 для v1 с 3 слоями
 # Средний Loss: 0.0026 для v2 с 3 слоями
 # Средний Loss: 0.0039 для v3 с 5 слоями
@@ -201,5 +200,6 @@ if __name__ == "__main__":
 #+30 эпох - 0.0007 - 1115 минут
 # Итого: 1811 минута или 30 часов
 
-# Добавляем LeakyReLU + BatchNorm
-# 
+# Добавляем LeakyReLU + BatchNorm (11:25)
+# 8 эпох - 0.0020 - 300 минут() (00:25)
+# +12 эпох - 500 минут()
