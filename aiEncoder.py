@@ -49,25 +49,21 @@ class Autoencoder(nn.Module):
         # Encoder
         self.enc1 = nn.Sequential(
             nn.Conv2d(3, 64, kernel_size=3, stride=2, padding=1),
-            nn.BatchNorm2d(64),
             nn.LeakyReLU(0.2)
         )  # 1024x1024 -> 512x512
 
         self.enc2 = nn.Sequential(
             nn.Conv2d(64, 128, kernel_size=3, stride=2, padding=1),
-            nn.BatchNorm2d(128),
             nn.LeakyReLU(0.2)
         )  # 512x512 -> 256x256
 
         self.enc3 = nn.Sequential(
             nn.Conv2d(128, 256, kernel_size=3, stride=2, padding=1),
-            nn.BatchNorm2d(256),
             nn.LeakyReLU(0.2)
         )  # 256x256 -> 128x128
 
         self.enc4 = nn.Sequential(
             nn.Conv2d(256, 512, kernel_size=3, stride=2, padding=1),
-            nn.BatchNorm2d(512),
             nn.LeakyReLU(0.2)
         )  # 128x128 -> 64x64
 
@@ -79,38 +75,32 @@ class Autoencoder(nn.Module):
 
         self.enc6 = nn.Sequential(
             nn.Conv2d(1024, 256, kernel_size=3, stride=1, padding=1),
-            nn.BatchNorm2d(256),
             nn.LeakyReLU(0.2)
         )  # 32x32 -> 32x32 (bottleneck)
 
         # Decoder
         self.dec1 = nn.Sequential(
             nn.ConvTranspose2d(256, 1024, kernel_size=3, stride=1, padding=1),
-            nn.BatchNorm2d(1024),
             nn.LeakyReLU(0.2)
         )  # 32x32 -> 32x32
 
         self.dec2 = nn.Sequential(
             nn.ConvTranspose2d(1024, 512, kernel_size=3, stride=2, padding=1, output_padding=1),
-            nn.BatchNorm2d(512),
             nn.LeakyReLU(0.2)
         )  # 32x32 -> 64x64
 
         self.dec3 = nn.Sequential(
             nn.ConvTranspose2d(512, 256, kernel_size=3, stride=2, padding=1, output_padding=1),
-            nn.BatchNorm2d(256),
             nn.LeakyReLU(0.2)
         )  # 64x64 -> 128x128
 
         self.dec4 = nn.Sequential(
             nn.ConvTranspose2d(256, 128, kernel_size=3, stride=2, padding=1, output_padding=1),
-            nn.BatchNorm2d(128),
             nn.LeakyReLU(0.2)
         )  # 128x128 -> 256x256
 
         self.dec5 = nn.Sequential(
             nn.ConvTranspose2d(128, 64, kernel_size=3, stride=2, padding=1, output_padding=1),
-            nn.BatchNorm2d(64),
             nn.LeakyReLU(0.2)
         )  # 256x256 -> 512x512
 
@@ -198,8 +188,7 @@ if __name__ == "__main__":
 # 10 эпох - 0.0023 - 530 минут
 # +5 эпох - 0.0020 - 166 минут
 #+30 эпох - 0.0007 - 1115 минут
-# Итого: 1811 минута или 30 часов
+# Итого: 1811 минута или 30 часов - 0.0007
 
-# Добавляем LeakyReLU + BatchNorm (11:25)
-# 8 эпох - 0.0020 - 300 минут() (00:25)
-# +12 эпох - 500 минут()
+# Добавляем LeakyReLU
+# 14 эпох + 2 эпохи + 10 эпох + 16 эпох + 12 эпох (54) - 0.00038
