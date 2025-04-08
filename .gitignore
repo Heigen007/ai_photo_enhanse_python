@@ -6,3 +6,5 @@ images
 save
 testImages
 # *.pth
+64x64
+128x128
