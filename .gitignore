@@ -3,7 +3,7 @@ unsplashPhotos
 compressed_images
 encoded_images
 images
-save
+# save
 testImages
 # *.pth
 64x64
