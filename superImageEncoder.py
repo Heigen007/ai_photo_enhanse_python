@@ -18,9 +18,9 @@ HIGH_RES_DIR = "128x128/faces"
 OUTPUT_DIR = "output_models_srgan"
 RESULTS_DIR = "results_srgan"
 BATCH_SIZE = 16
-EPOCHS = 30
+EPOCHS = 50
 LR_G = 0.0001
-LR_D = 0.00005
+LR_D = 0.00002
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -53,7 +53,7 @@ class SuperResDataset(Dataset):
 
         return low_res_img, high_res_img
 
-# Трансформации (без нормализации, диапазон [0, 1])
+# Трансформации (диапазон [0, 1])
 low_res_transform = transforms.Compose([
     transforms.ToTensor()
 ])
@@ -71,7 +71,7 @@ test_high_res_img = Image.open(os.path.join(HIGH_RES_DIR, "00000.png")).convert(
 test_low_res_tensor = low_res_transform(test_low_res_img).unsqueeze(0).to(DEVICE)
 test_high_res_tensor = high_res_transform(test_high_res_img).unsqueeze(0).to(DEVICE)
 
-# Генератор
+# Генератор (с 6 residual-блоками, один шаг upsampling)
 class Generator(nn.Module):
     def __init__(self):
         super(Generator, self).__init__()
@@ -81,7 +81,7 @@ class Generator(nn.Module):
         )
 
         self.res_blocks = nn.Sequential(
-            *[self._make_residual_block(64) for _ in range(5)]
+            *[self._make_residual_block(64) for _ in range(6)]
         )
 
         self.mid = nn.Sequential(
@@ -89,11 +89,12 @@ class Generator(nn.Module):
             nn.BatchNorm2d(64)
         )
 
+        # Один шаг upsampling (64x64 -> 128x128)
         self.upsample = nn.Sequential(
-            nn.Conv2d(64, 256, kernel_size=3, padding=1),
-            nn.PixelShuffle(2),
+            nn.Conv2d(64, 64 * 4, kernel_size=3, padding=1),
+            nn.PixelShuffle(2),  # 64x64 -> 128x128
             nn.PReLU(),
-            nn.Dropout(0.1)
+            nn.Dropout(0.3)
         )
 
         self.final = nn.Conv2d(64, 3, kernel_size=9, padding=4)
@@ -152,18 +153,50 @@ class Discriminator(nn.Module):
     def forward(self, x):
         return self.net(x)
 
-# VGG для перцептивной потери
+# VGG для перцептивной потери (обрезаем до conv4_4, слой 20)
 class VGG19Loss(nn.Module):
     def __init__(self):
         super(VGG19Loss, self).__init__()
         vgg = models.vgg19(pretrained=True).features
-        self.vgg = nn.Sequential(*list(vgg)[:35]).to(DEVICE).eval()
+        self.vgg = nn.Sequential(*list(vgg)[:20]).to(DEVICE).eval()  # Обрезаем до conv4_4
         for param in self.vgg.parameters():
             param.requires_grad = False
+        self.normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
 
     def forward(self, x):
-        # VGG ожидает вход в [0, 1], нормализация не нужна, так как данные уже в [0, 1]
+        x = self.normalize(x)
         return self.vgg(x)
+
+# Функция для цветовой потери (HSV)
+def color_loss(fake, real):
+    mse_loss = nn.MSELoss()
+    
+    def rgb_to_hsv_torch(rgb):
+        r, g, b = rgb[:, 0, :, :], rgb[:, 1, :, :], rgb[:, 2, :, :]
+        c_max, _ = torch.max(rgb, dim=1)
+        c_min, _ = torch.min(rgb, dim=1)
+        delta = c_max - c_min
+        
+        h = torch.zeros_like(c_max)
+        mask = (c_max == r) & (delta != 0)
+        h[mask] = 60 * (((g[mask] - b[mask]) / delta[mask]) % 6)
+        mask = (c_max == g) & (delta != 0)
+        h[mask] = 60 * ((b[mask] - r[mask]) / delta[mask] + 2)
+        mask = (c_max == b) & (delta != 0)
+        h[mask] = 60 * ((r[mask] - g[mask]) / delta[mask] + 4)
+        h = h / 360
+        
+        s = torch.zeros_like(c_max)
+        mask = c_max != 0
+        s[mask] = delta[mask] / c_max[mask]
+        
+        v = c_max
+        
+        return torch.stack([h, s, v], dim=1)
+
+    fake_hsv = rgb_to_hsv_torch(fake)
+    real_hsv = rgb_to_hsv_torch(real)
+    return mse_loss(fake_hsv[:, 0, :, :], real_hsv[:, 0, :, :])
 
 # Функция загрузки моделей
 def load_models():
@@ -184,8 +217,8 @@ def evaluate_model(generator, low_res_tensor, high_res_tensor):
     generator.eval()
     with torch.no_grad():
         output = generator(low_res_tensor)
-        output = output.cpu().numpy()  # Уже в [0, 1]
-        high_res = high_res_tensor.cpu().numpy()  # Уже в [0, 1]
+        output = output.cpu().numpy()
+        high_res = high_res_tensor.cpu().numpy()
         psnr_value = psnr(high_res[0].transpose(1, 2, 0), output[0].transpose(1, 2, 0), data_range=1.0)
         ssim_value = ssim(high_res[0].transpose(1, 2, 0), output[0].transpose(1, 2, 0), channel_axis=2, data_range=1.0)
     return psnr_value, ssim_value
@@ -195,13 +228,13 @@ def train_model():
     generator, discriminator = load_models()
     vgg_loss = VGG19Loss()
 
-    g_optimizer = optim.Adam(generator.parameters(), lr=LR_G, betas=(0.9, 0.999))
+    g_optimizer = optim.Adam(generator.parameters(), lr=LR_G, betas=(0.9, 0.999), weight_decay=1e-4)
     d_optimizer = optim.Adam(discriminator.parameters(), lr=LR_D, betas=(0.9, 0.999))
     mse_loss = nn.MSELoss()
     bce_loss = nn.BCEWithLogitsLoss()
 
-    real_label = torch.ones((BATCH_SIZE, 1, 1, 1), device=DEVICE) * 0.9
-    fake_label = torch.zeros((BATCH_SIZE, 1, 1, 1), device=DEVICE)
+    real_label = torch.ones((BATCH_SIZE, 1, 1, 1), device=DEVICE) * 0.8
+    fake_label = torch.zeros((BATCH_SIZE, 1, 1, 1), device=DEVICE) + 0.2
 
     start_time = time.time()
     print("Начинаем обучение SRGAN...")
@@ -210,9 +243,15 @@ def train_model():
         generator.train()
         discriminator.train()
         g_loss_total, d_loss_total = 0, 0
+        g_loss_content_total, g_loss_adv_total, pixel_loss_total, color_loss_total = 0, 0, 0, 0
 
         for batch_idx, (low_res, high_res) in enumerate(dataloader):
             low_res, high_res = low_res.to(DEVICE), high_res.to(DEVICE)
+
+            # Проверка размеров входных данных
+            if low_res.shape[2:] != (64, 64) or high_res.shape[2:] != (128, 128):
+                print(f"Неверный размер: low_res {low_res.shape}, high_res {high_res.shape}")
+                continue
 
             # Обучение дискриминатора
             d_optimizer.zero_grad()
@@ -238,18 +277,36 @@ def train_model():
             g_loss_content = mse_loss(vgg_fake, vgg_real)
 
             pixel_loss = mse_loss(fake_high_res, high_res)
-            g_loss = g_loss_content + 0.01 * g_loss_adv + 0.1 * pixel_loss
+            color_loss_value = color_loss(fake_high_res, high_res)
+            
+            # Считаем итоговую потерю
+            g_loss = 0.1 * g_loss_content + 0.05 * g_loss_adv + 1.0 * pixel_loss + 0.3 * color_loss_value
             g_loss.backward()
             g_optimizer.step()
+            
+            # Суммируем компоненты потерь для логирования
             g_loss_total += g_loss.item()
+            g_loss_content_total += g_loss_content.item()
+            g_loss_adv_total += g_loss_adv.item()
+            pixel_loss_total += pixel_loss.item()
+            color_loss_total += color_loss_value.item()
 
             if batch_idx % 35 == 0:
                 print(f"Epoch [{epoch+1}/{EPOCHS}], Batch [{batch_idx}/{len(dataloader)}], "
-                      f"D Loss: {d_loss.item():.6f}, G Loss: {g_loss.item():.6f}")
+                      f"D Loss: {d_loss.item():.6f}, G Loss: {g_loss.item():.6f}, "
+                      f"G Content: {g_loss_content.item():.6f}, G Adv: {g_loss_adv.item():.6f}, "
+                      f"Pixel: {pixel_loss.item():.6f}, Color: {color_loss_value.item():.6f}")
 
         avg_g_loss = g_loss_total / len(dataloader)
         avg_d_loss = d_loss_total / len(dataloader)
+        avg_g_loss_content = g_loss_content_total / len(dataloader)
+        avg_g_loss_adv = g_loss_adv_total / len(dataloader)
+        avg_pixel_loss = pixel_loss_total / len(dataloader)
+        avg_color_loss = color_loss_total / len(dataloader)
+        
         print(f"Epoch [{epoch+1}/{EPOCHS}] завершена, Avg D Loss: {avg_d_loss:.6f}, Avg G Loss: {avg_g_loss:.6f}")
+        print(f"Avg G Content: {avg_g_loss_content:.6f}, Avg G Adv: {avg_g_loss_adv:.6f}, "
+              f"Avg Pixel: {avg_pixel_loss:.6f}, Avg Color: {avg_color_loss:.6f}")
 
         # Оценка PSNR и SSIM
         psnr_value, ssim_value = evaluate_model(generator, test_low_res_tensor, test_high_res_tensor)
