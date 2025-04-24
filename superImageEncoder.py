@@ -13,14 +13,14 @@ from skimage.metrics import structural_similarity as ssim
 import torchvision.utils as vutils
 
 # Параметры
-LOW_RES_DIR = "64x64/faces"
-HIGH_RES_DIR = "128x128/faces"
-OUTPUT_DIR = "output_models_srgan"
-RESULTS_DIR = "results_srgan"
+LOW_RES_DIR = "128x128/faces"  # Папка с изображениями 128x128
+HIGH_RES_DIR = "256x256/faces"  # Папка с изображениями 256x256
+OUTPUT_DIR = "output_models_srgan_128to256"
+RESULTS_DIR = "results_srgan_128to256"
 BATCH_SIZE = 16
 EPOCHS = 50
-LR_G = 0.0001
-LR_D = 0.00002
+LR_G = 0.00005  # Оставляем сниженное значение
+LR_D = 0.00001  # Оставляем сниженное значение
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -71,7 +71,7 @@ test_high_res_img = Image.open(os.path.join(HIGH_RES_DIR, "00000.png")).convert(
 test_low_res_tensor = low_res_transform(test_low_res_img).unsqueeze(0).to(DEVICE)
 test_high_res_tensor = high_res_transform(test_high_res_img).unsqueeze(0).to(DEVICE)
 
-# Генератор (с 6 residual-блоками, один шаг upsampling)
+# Генератор (с 8 residual-блоками, один шаг upsampling: 128x128 -> 256x256)
 class Generator(nn.Module):
     def __init__(self):
         super(Generator, self).__init__()
@@ -81,7 +81,7 @@ class Generator(nn.Module):
         )
 
         self.res_blocks = nn.Sequential(
-            *[self._make_residual_block(64) for _ in range(6)]
+            *[self._make_residual_block(64) for _ in range(8)]  # 8 блоков для более сложной задачи
         )
 
         self.mid = nn.Sequential(
@@ -89,10 +89,10 @@ class Generator(nn.Module):
             nn.BatchNorm2d(64)
         )
 
-        # Один шаг upsampling (64x64 -> 128x128)
+        # Один шаг upsampling (128x128 -> 256x256)
         self.upsample = nn.Sequential(
             nn.Conv2d(64, 64 * 4, kernel_size=3, padding=1),
-            nn.PixelShuffle(2),  # 64x64 -> 128x128
+            nn.PixelShuffle(2),  # 128x128 -> 256x256
             nn.PReLU(),
             nn.Dropout(0.3)
         )
@@ -151,6 +151,9 @@ class Discriminator(nn.Module):
         )
 
     def forward(self, x):
+        # Добавляем небольшой гауссовский шум
+        noise = torch.randn_like(x) * 0.01
+        x = x + noise
         return self.net(x)
 
 # VGG для перцептивной потери (обрезаем до conv4_4, слой 20)
@@ -158,7 +161,7 @@ class VGG19Loss(nn.Module):
     def __init__(self):
         super(VGG19Loss, self).__init__()
         vgg = models.vgg19(pretrained=True).features
-        self.vgg = nn.Sequential(*list(vgg)[:20]).to(DEVICE).eval()  # Обрезаем до conv4_4
+        self.vgg = nn.Sequential(*list(vgg)[:20]).to(DEVICE).eval()
         for param in self.vgg.parameters():
             param.requires_grad = False
         self.normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
@@ -248,8 +251,8 @@ def train_model():
         for batch_idx, (low_res, high_res) in enumerate(dataloader):
             low_res, high_res = low_res.to(DEVICE), high_res.to(DEVICE)
 
-            # Проверка размеров входных данных
-            if low_res.shape[2:] != (64, 64) or high_res.shape[2:] != (128, 128):
+            # Проверка размеров входных данных (128x128 -> 256x256)
+            if low_res.shape[2:] != (128, 128) or high_res.shape[2:] != (256, 256):
                 print(f"Неверный размер: low_res {low_res.shape}, high_res {high_res.shape}")
                 continue
 
@@ -280,7 +283,7 @@ def train_model():
             color_loss_value = color_loss(fake_high_res, high_res)
             
             # Считаем итоговую потерю
-            g_loss = 0.1 * g_loss_content + 0.05 * g_loss_adv + 1.0 * pixel_loss + 0.3 * color_loss_value
+            g_loss = 0.1 * g_loss_content + 0.05 * g_loss_adv + 2.0 * pixel_loss + 0.7 * color_loss_value
             g_loss.backward()
             g_optimizer.step()
             
@@ -329,3 +332,9 @@ def train_model():
 
 if __name__ == "__main__":
     train_model()
+
+# v0 - PSNR (00000.png): 8.21, SSIM (00000.png): 0.0422
+# v1 - PSNR (00000.png): 10.44, SSIM (00000.png): 0.0566
+# v2 - PSNR (00000.png): 26.43, SSIM (00000.png): 0.8029
+# v3 - переходим на фото 128 -> 256, потому что на фото 64x64 очень мало деталей, поэтому дорисовывать не из чего - и так нет изначального понятия, что дорисовывать
+# v3 - PSNR (00000.png): 30.18, SSIM (00000.png): 0.8573
