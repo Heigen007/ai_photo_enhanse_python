@@ -13,14 +13,14 @@ from skimage.metrics import structural_similarity as ssim
 import torchvision.utils as vutils
 
 # Параметры
-LOW_RES_DIR = "128x128/faces"  # Папка с изображениями 128x128
-HIGH_RES_DIR = "256x256/faces"  # Папка с изображениями 256x256
+LOW_RES_DIR = "128x128/faces"
+HIGH_RES_DIR = "256x256/faces"
 OUTPUT_DIR = "output_models_srgan_128to256"
 RESULTS_DIR = "results_srgan_128to256"
-BATCH_SIZE = 16
+BATCH_SIZE = 12
 EPOCHS = 50
-LR_G = 0.00005  # Оставляем сниженное значение
-LR_D = 0.00001  # Оставляем сниженное значение
+LR_G = 0.00005  # Оставляем как есть
+LR_D = 0.00001  # Оставляем как есть
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -71,7 +71,7 @@ test_high_res_img = Image.open(os.path.join(HIGH_RES_DIR, "00000.png")).convert(
 test_low_res_tensor = low_res_transform(test_low_res_img).unsqueeze(0).to(DEVICE)
 test_high_res_tensor = high_res_transform(test_high_res_img).unsqueeze(0).to(DEVICE)
 
-# Генератор (с 8 residual-блоками, один шаг upsampling: 128x128 -> 256x256)
+# Генератор (с 12 residual-блоками, двухшаговый upsampling: 128x128 -> 192x192 -> 256x256)
 class Generator(nn.Module):
     def __init__(self):
         super(Generator, self).__init__()
@@ -81,7 +81,7 @@ class Generator(nn.Module):
         )
 
         self.res_blocks = nn.Sequential(
-            *[self._make_residual_block(64) for _ in range(8)]  # 8 блоков для более сложной задачи
+            *[self._make_residual_block(64) for _ in range(12)]
         )
 
         self.mid = nn.Sequential(
@@ -89,7 +89,7 @@ class Generator(nn.Module):
             nn.BatchNorm2d(64)
         )
 
-        # Один шаг upsampling (128x128 -> 256x256)
+        # Одношаговый upsampling (128x128 -> 256x256)
         self.upsample = nn.Sequential(
             nn.Conv2d(64, 64 * 4, kernel_size=3, padding=1),
             nn.PixelShuffle(2),  # 128x128 -> 256x256
@@ -114,7 +114,7 @@ class Generator(nn.Module):
         x = self.mid(x + res)
         x = self.upsample(x)
         x = self.final(x)
-        return torch.sigmoid(x)  # [0, 1]
+        return torch.sigmoid(x)
 
 # Дискриминатор
 class Discriminator(nn.Module):
@@ -151,7 +151,6 @@ class Discriminator(nn.Module):
         )
 
     def forward(self, x):
-        # Добавляем небольшой гауссовский шум
         noise = torch.randn_like(x) * 0.01
         x = x + noise
         return self.net(x)
@@ -282,7 +281,7 @@ def train_model():
             pixel_loss = mse_loss(fake_high_res, high_res)
             color_loss_value = color_loss(fake_high_res, high_res)
             
-            # Считаем итоговую потерю
+            # Считаем итоговую потерю (веса оставляем как есть)
             g_loss = 0.1 * g_loss_content + 0.05 * g_loss_adv + 2.0 * pixel_loss + 0.7 * color_loss_value
             g_loss.backward()
             g_optimizer.step()
@@ -294,7 +293,7 @@ def train_model():
             pixel_loss_total += pixel_loss.item()
             color_loss_total += color_loss_value.item()
 
-            if batch_idx % 35 == 0:
+            if batch_idx % 45 == 0:
                 print(f"Epoch [{epoch+1}/{EPOCHS}], Batch [{batch_idx}/{len(dataloader)}], "
                       f"D Loss: {d_loss.item():.6f}, G Loss: {g_loss.item():.6f}, "
                       f"G Content: {g_loss_content.item():.6f}, G Adv: {g_loss_adv.item():.6f}, "
@@ -338,3 +337,155 @@ if __name__ == "__main__":
 # v2 - PSNR (00000.png): 26.43, SSIM (00000.png): 0.8029
 # v3 - переходим на фото 128 -> 256, потому что на фото 64x64 очень мало деталей, поэтому дорисовывать не из чего - и так нет изначального понятия, что дорисовывать
 # v3 - PSNR (00000.png): 30.18, SSIM (00000.png): 0.8573
+# v4 - PSNR (00000.png): 29.74, SSIM (00000.png): 0.8557
+
+# Начинаем обучение SRGAN...
+# Epoch [1/50], Batch [0/84], D Loss: 0.693636, G Loss: 17.526901, G Content: 170.830063, G Adv: 0.677015, Pixel: 0.086926, Color: 0.337417
+# Epoch [1/50], Batch [45/84], D Loss: 0.658779, G Loss: 9.719891, G Content: 93.908600, G Adv: 0.758105, Pixel: 0.037676, Color: 0.308247
+# Epoch [1/50] завершена, Avg D Loss: 0.653787, Avg G Loss: 10.233411
+# Avg G Content: 98.691145, Avg G Adv: 0.745274, Avg Pixel: 0.047079, Avg Color: 0.332678
+# PSNR (00000.png): 18.18, SSIM (00000.png): 0.5996
+# Модели сохранены: epoch 1
+# Epoch [2/50], Batch [0/84], D Loss: 0.623311, G Loss: 6.755611, G Content: 64.295341, G Adv: 0.801653, Pixel: 0.017319, Color: 0.359082
+# Epoch [2/50], Batch [45/84], D Loss: 0.587578, G Loss: 6.964721, G Content: 66.242218, G Adv: 0.885418, Pixel: 0.013815, Color: 0.383711
+# Epoch [2/50] завершена, Avg D Loss: 0.580598, Avg G Loss: 6.635624
+# Avg G Content: 62.942478, Avg G Adv: 0.898659, Avg Pixel: 0.016012, Avg Color: 0.377740
+# PSNR (00000.png): 20.28, SSIM (00000.png): 0.6938
+# Модели сохранены: epoch 2
+# Epoch [3/50], Batch [0/84], D Loss: 0.559824, G Loss: 5.522217, G Content: 51.616779, G Adv: 0.963720, Pixel: 0.011439, Color: 0.413537
+# Epoch [3/50], Batch [45/84], D Loss: 0.521495, G Loss: 5.637918, G Content: 52.910583, G Adv: 1.091579, Pixel: 0.012441, Color: 0.381997
+# Epoch [3/50] завершена, Avg D Loss: 0.533931, Avg G Loss: 5.592652
+# Avg G Content: 52.429494, Avg G Adv: 1.057324, Avg Pixel: 0.011814, Avg Color: 0.390298
+# PSNR (00000.png): 21.25, SSIM (00000.png): 0.7276
+# Модели сохранены: epoch 3
+# Epoch [4/50], Batch [0/84], D Loss: 0.526078, G Loss: 5.848394, G Content: 54.958157, G Adv: 1.150754, Pixel: 0.010551, Color: 0.391341
+# Epoch [4/50], Batch [45/84], D Loss: 0.517463, G Loss: 5.262924, G Content: 49.121319, G Adv: 1.171898, Pixel: 0.010951, Color: 0.386135
+# Epoch [4/50] завершена, Avg D Loss: 0.515777, Avg G Loss: 4.980593
+# Avg G Content: 46.330617, Avg G Adv: 1.178417, Avg Pixel: 0.009529, Avg Color: 0.385073
+# PSNR (00000.png): 21.51, SSIM (00000.png): 0.7430
+# Модели сохранены: epoch 4
+# Epoch [5/50], Batch [0/84], D Loss: 0.518141, G Loss: 4.484663, G Content: 41.583706, G Adv: 1.216957, Pixel: 0.006480, Color: 0.360692
+# Epoch [5/50], Batch [45/84], D Loss: 0.507642, G Loss: 4.266726, G Content: 39.167999, G Adv: 1.267507, Pixel: 0.008101, Color: 0.386212
+# Epoch [5/50] завершена, Avg D Loss: 0.508189, Avg G Loss: 4.577546
+# Avg G Content: 42.371292, Avg G Adv: 1.252731, Avg Pixel: 0.008625, Avg Color: 0.372187
+# PSNR (00000.png): 22.86, SSIM (00000.png): 0.7501
+# Модели сохранены: epoch 5
+# Epoch [6/50], Batch [0/84], D Loss: 0.507959, G Loss: 4.619750, G Content: 42.958286, G Adv: 1.181863, Pixel: 0.006304, Color: 0.360317
+# Epoch [6/50], Batch [45/84], D Loss: 0.518851, G Loss: 4.827977, G Content: 45.324200, G Adv: 1.167009, Pixel: 0.006268, Color: 0.320957
+# Epoch [6/50] завершена, Avg D Loss: 0.520444, Avg G Loss: 4.240238
+# Avg G Content: 39.262223, Avg G Adv: 1.229586, Avg Pixel: 0.007158, Avg Color: 0.340317
+# PSNR (00000.png): 24.28, SSIM (00000.png): 0.7691
+# Модели сохранены: epoch 6
+# Epoch [7/50], Batch [0/84], D Loss: 0.583830, G Loss: 4.357522, G Content: 41.087162, G Adv: 1.253317, Pixel: 0.004883, Color: 0.251961
+# Epoch [7/50], Batch [45/84], D Loss: 0.503855, G Loss: 3.870990, G Content: 35.723270, G Adv: 1.350100, Pixel: 0.005607, Color: 0.314206
+# Epoch [7/50] завершена, Avg D Loss: 0.519104, Avg G Loss: 3.905839
+# Avg G Content: 36.380853, Avg G Adv: 1.211979, Avg Pixel: 0.005621, Avg Color: 0.279876
+# PSNR (00000.png): 25.40, SSIM (00000.png): 0.7918
+# Модели сохранены: epoch 7
+# Epoch [8/50], Batch [0/84], D Loss: 0.603932, G Loss: 3.598404, G Content: 33.849743, G Adv: 0.844219, Pixel: 0.003754, Color: 0.233873
+# Epoch [8/50], Batch [45/84], D Loss: 0.721428, G Loss: 3.392710, G Content: 31.924774, G Adv: 0.618282, Pixel: 0.004438, Color: 0.229203
+# Epoch [8/50] завершена, Avg D Loss: 0.563097, Avg G Loss: 3.656291
+# Avg G Content: 34.373770, Avg G Adv: 1.100524, Avg Pixel: 0.004760, Avg Color: 0.220526
+# PSNR (00000.png): 26.16, SSIM (00000.png): 0.7959
+# Модели сохранены: epoch 8
+# Epoch [9/50], Batch [0/84], D Loss: 0.604584, G Loss: 3.237943, G Content: 30.426414, G Adv: 0.723117, Pixel: 0.003707, Color: 0.216760
+# Epoch [9/50], Batch [45/84], D Loss: 0.577575, G Loss: 3.940844, G Content: 37.434063, G Adv: 1.069872, Pixel: 0.003272, Color: 0.196286
+# Epoch [9/50] завершена, Avg D Loss: 0.601976, Avg G Loss: 3.481768
+# Avg G Content: 33.004740, Avg G Adv: 0.941928, Avg Pixel: 0.004334, Avg Color: 0.179329
+# PSNR (00000.png): 27.56, SSIM (00000.png): 0.8109
+# Модели сохранены: epoch 9
+# Epoch [10/50], Batch [0/84], D Loss: 0.530784, G Loss: 3.994127, G Content: 38.205719, G Adv: 1.025937, Pixel: 0.003994, Color: 0.163244
+# Epoch [10/50], Batch [45/84], D Loss: 0.535345, G Loss: 3.380347, G Content: 31.939133, G Adv: 1.136119, Pixel: 0.003336, Color: 0.175652
+# Epoch [10/50] завершена, Avg D Loss: 0.587497, Avg G Loss: 3.334588
+# Avg G Content: 31.616584, Avg G Adv: 0.980889, Avg Pixel: 0.004062, Avg Color: 0.165372
+# PSNR (00000.png): 25.72, SSIM (00000.png): 0.8179
+# Модели сохранены: epoch 10
+# Epoch [11/50], Batch [0/84], D Loss: 0.563971, G Loss: 3.317779, G Content: 31.660479, G Adv: 0.982225, Pixel: 0.004302, Color: 0.134309
+# Epoch [11/50], Batch [45/84], D Loss: 0.513771, G Loss: 3.205821, G Content: 30.064829, G Adv: 1.062575, Pixel: 0.002603, Color: 0.201433
+# Epoch [11/50] завершена, Avg D Loss: 0.586975, Avg G Loss: 3.232234
+# Avg G Content: 30.599221, Avg G Adv: 1.025104, Avg Pixel: 0.004031, Avg Color: 0.161419
+# PSNR (00000.png): 28.01, SSIM (00000.png): 0.8238
+# Модели сохранены: epoch 11
+# Epoch [12/50], Batch [0/84], D Loss: 0.753589, G Loss: 3.507150, G Content: 33.284657, G Adv: 1.169213, Pixel: 0.007143, Color: 0.151338
+# Epoch [12/50], Batch [45/84], D Loss: 0.568659, G Loss: 2.741771, G Content: 26.029970, G Adv: 0.849723, Pixel: 0.002368, Color: 0.130788
+# Epoch [12/50] завершена, Avg D Loss: 0.589796, Avg G Loss: 3.106330
+# Avg G Content: 29.469143, Avg G Adv: 0.955561, Avg Pixel: 0.003739, Avg Color: 0.148801
+# PSNR (00000.png): 28.26, SSIM (00000.png): 0.8339
+# Модели сохранены: epoch 12
+# Epoch [13/50], Batch [0/84], D Loss: 0.601472, G Loss: 2.783358, G Content: 26.494789, G Adv: 0.742849, Pixel: 0.003351, Color: 0.128622
+# Epoch [13/50], Batch [45/84], D Loss: 0.558658, G Loss: 2.944422, G Content: 27.690912, G Adv: 1.228729, Pixel: 0.005691, Color: 0.146446
+# Epoch [13/50] завершена, Avg D Loss: 0.579459, Avg G Loss: 3.018772
+# Avg G Content: 28.629519, Avg G Adv: 0.991760, Avg Pixel: 0.003897, Avg Color: 0.140626
+# PSNR (00000.png): 28.55, SSIM (00000.png): 0.8364
+# Модели сохранены: epoch 13
+# Epoch [14/50], Batch [0/84], D Loss: 0.544134, G Loss: 3.202612, G Content: 30.643969, G Adv: 0.952701, Pixel: 0.003181, Color: 0.120311
+# Epoch [14/50], Batch [45/84], D Loss: 0.506057, G Loss: 3.423963, G Content: 32.702274, G Adv: 1.250418, Pixel: 0.002954, Color: 0.121868
+# Epoch [14/50] завершена, Avg D Loss: 0.580300, Avg G Loss: 2.941542
+# Avg G Content: 27.958287, Avg G Adv: 0.995723, Avg Pixel: 0.003447, Avg Color: 0.127191
+# PSNR (00000.png): 28.75, SSIM (00000.png): 0.8391
+# Модели сохранены: epoch 14
+# Epoch [15/50], Batch [0/84], D Loss: 0.691816, G Loss: 2.893217, G Content: 27.448660, G Adv: 0.738217, Pixel: 0.008730, Color: 0.134257
+# Epoch [15/50], Batch [45/84], D Loss: 0.650488, G Loss: 2.830728, G Content: 26.916733, G Adv: 1.243085, Pixel: 0.002032, Color: 0.104050
+# Epoch [15/50] завершена, Avg D Loss: 0.562104, Avg G Loss: 2.876996
+# Avg G Content: 27.292208, Avg G Adv: 1.044841, Avg Pixel: 0.003440, Avg Color: 0.126647
+# PSNR (00000.png): 29.04, SSIM (00000.png): 0.8450
+# Модели сохранены: epoch 15
+
+
+# // Тут я еачал дообучение, то есть 1 эпоха это 16
+
+# Начинаем обучение SRGAN...
+# Epoch [1/50], Batch [0/84], D Loss: 0.514015, G Loss: 3.219961, G Content: 30.568291, G Adv: 1.294584, Pixel: 0.002936, Color: 0.132186
+# Epoch [1/50], Batch [45/84], D Loss: 0.524129, G Loss: 2.605242, G Content: 24.681633, G Adv: 1.098701, Pixel: 0.002542, Color: 0.110085
+# Epoch [1/50] завершена, Avg D Loss: 0.575884, Avg G Loss: 2.821848
+# Avg G Content: 26.785651, Avg G Adv: 1.015267, Avg Pixel: 0.003421, Avg Color: 0.122397
+# PSNR (00000.png): 28.58, SSIM (00000.png): 0.8444
+# Модели сохранены: epoch 1
+# Epoch [2/50], Batch [0/84], D Loss: 0.722703, G Loss: 2.562007, G Content: 24.483788, G Adv: 0.602230, Pixel: 0.002787, Color: 0.111348
+# Epoch [2/50], Batch [45/84], D Loss: 0.757549, G Loss: 2.665039, G Content: 25.132294, G Adv: 1.297431, Pixel: 0.002342, Color: 0.117506
+# Epoch [2/50] завершена, Avg D Loss: 0.570899, Avg G Loss: 2.748131
+# Avg G Content: 26.083956, Avg G Adv: 1.035528, Avg Pixel: 0.003327, Avg Color: 0.116150
+# PSNR (00000.png): 28.99, SSIM (00000.png): 0.8486
+# Модели сохранены: epoch 2
+# Epoch [3/50], Batch [0/84], D Loss: 0.505806, G Loss: 2.311912, G Content: 21.601130, G Adv: 1.250167, Pixel: 0.001719, Color: 0.122646
+# Epoch [3/50], Batch [45/84], D Loss: 0.585262, G Loss: 2.655411, G Content: 25.296875, G Adv: 0.799284, Pixel: 0.002131, Color: 0.116425
+# Epoch [3/50] завершена, Avg D Loss: 0.559736, Avg G Loss: 2.710705
+# Avg G Content: 25.673203, Avg G Adv: 1.066305, Avg Pixel: 0.003143, Avg Color: 0.119689
+# PSNR (00000.png): 28.25, SSIM (00000.png): 0.8478
+# Модели сохранены: epoch 3
+# Epoch [4/50], Batch [0/84], D Loss: 0.534823, G Loss: 2.521182, G Content: 23.896187, G Adv: 0.835291, Pixel: 0.002094, Color: 0.122301
+# Epoch [4/50], Batch [45/84], D Loss: 0.564785, G Loss: 2.246342, G Content: 20.966158, G Adv: 0.737750, Pixel: 0.002499, Color: 0.154058
+# Epoch [4/50] завершена, Avg D Loss: 0.604624, Avg G Loss: 2.660522
+# Avg G Content: 25.190368, Avg G Adv: 1.013272, Avg Pixel: 0.003131, Avg Color: 0.120800
+# PSNR (00000.png): 29.21, SSIM (00000.png): 0.8453
+# Модели сохранены: epoch 4
+# Epoch [5/50], Batch [0/84], D Loss: 0.518686, G Loss: 2.612652, G Content: 24.482092, G Adv: 1.088397, Pixel: 0.002306, Color: 0.150588
+# Epoch [5/50], Batch [45/84], D Loss: 0.564072, G Loss: 2.477931, G Content: 23.584753, G Adv: 0.768192, Pixel: 0.001963, Color: 0.110170
+# Epoch [5/50] завершена, Avg D Loss: 0.556649, Avg G Loss: 2.628938
+# Avg G Content: 24.848185, Avg G Adv: 1.035874, Avg Pixel: 0.003236, Avg Color: 0.122648
+# PSNR (00000.png): 29.53, SSIM (00000.png): 0.8513
+# Модели сохранены: epoch 5
+# Epoch [6/50], Batch [0/84], D Loss: 0.518290, G Loss: 2.687692, G Content: 25.362150, G Adv: 1.103040, Pixel: 0.002417, Color: 0.130701
+# Epoch [6/50], Batch [45/84], D Loss: 0.527048, G Loss: 2.673843, G Content: 25.444216, G Adv: 1.069024, Pixel: 0.001989, Color: 0.102846
+# Epoch [6/50] завершена, Avg D Loss: 0.549917, Avg G Loss: 2.580459
+# Avg G Content: 24.402496, Avg G Adv: 1.085773, Avg Pixel: 0.003019, Avg Color: 0.114119
+# PSNR (00000.png): 29.39, SSIM (00000.png): 0.8517
+# Модели сохранены: epoch 6
+# Epoch [7/50], Batch [0/84], D Loss: 0.575116, G Loss: 3.043497, G Content: 29.140089, G Adv: 0.824086, Pixel: 0.003370, Color: 0.116492
+# Epoch [7/50], Batch [45/84], D Loss: 0.604480, G Loss: 2.913429, G Content: 28.041548, G Adv: 0.662611, Pixel: 0.002211, Color: 0.102459
+# Epoch [7/50] завершена, Avg D Loss: 0.563671, Avg G Loss: 2.556813
+# Avg G Content: 24.161623, Avg G Adv: 1.069715, Avg Pixel: 0.003002, Avg Color: 0.115944
+# PSNR (00000.png): 29.02, SSIM (00000.png): 0.8523
+# Модели сохранены: epoch 7
+# Epoch [8/50], Batch [0/84], D Loss: 0.575666, G Loss: 2.483696, G Content: 23.496832, G Adv: 1.160421, Pixel: 0.003831, Color: 0.097613
+# Epoch [8/50], Batch [45/84], D Loss: 0.522837, G Loss: 2.712124, G Content: 25.674353, G Adv: 1.158401, Pixel: 0.001996, Color: 0.118253
+# Epoch [8/50] завершена, Avg D Loss: 0.566314, Avg G Loss: 2.533400
+# Avg G Content: 23.940656, Avg G Adv: 1.069123, Avg Pixel: 0.003153, Avg Color: 0.113675
+# PSNR (00000.png): 29.08, SSIM (00000.png): 0.8497
+# Модели сохранены: epoch 8
+# Epoch [9/50], Batch [0/84], D Loss: 0.510355, G Loss: 2.855969, G Content: 27.182505, G Adv: 1.120532, Pixel: 0.001961, Color: 0.111098
+# Epoch [9/50], Batch [45/84], D Loss: 0.554084, G Loss: 2.105999, G Content: 19.649836, G Adv: 1.045612, Pixel: 0.003254, Color: 0.117469
+# Epoch [9/50] завершена, Avg D Loss: 0.569482, Avg G Loss: 2.503606
+# Avg G Content: 23.621259, Avg G Adv: 1.076628, Avg Pixel: 0.003056, Avg Color: 0.116483
+# PSNR (00000.png): 29.74, SSIM (00000.png): 0.8557
+# Модели сохранены: epoch 9
