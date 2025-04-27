@@ -79,7 +79,7 @@ test_high_res_img = Image.open(os.path.join(HIGH_RES_DIR, "00000.png")).convert(
 test_low_res_tensor = low_res_transform(test_low_res_img).unsqueeze(0).to(DEVICE)
 test_high_res_tensor = high_res_transform(test_high_res_img).unsqueeze(0).to(DEVICE)
 
-# Генератор (с 8 residual-блоками, двухшаговый upsampling: 128x128 -> 192x192 -> 256x256)
+# Генератор (с 12 residual-блоками, двухшаговый upsampling: 128x128 -> 192x192 -> 256x256)
 class Generator(nn.Module):
     def __init__(self):
         super(Generator, self).__init__()
@@ -89,7 +89,7 @@ class Generator(nn.Module):
         )
 
         self.res_blocks = nn.Sequential(
-            *[self._make_residual_block(64) for _ in range(8)]
+            *[self._make_residual_block(64) for _ in range(12)]
         )
 
         self.mid = nn.Sequential(
@@ -233,6 +233,20 @@ def evaluate_model(generator, low_res_tensor, high_res_tensor):
         ssim_value = ssim(high_res[0].transpose(1, 2, 0), output[0].transpose(1, 2, 0), channel_axis=2, data_range=1.0)
     return psnr_value, ssim_value
 
+# Функция для Gradient Penalty
+def gradient_penalty(discriminator, real, fake):
+    batch_size = real.size(0)
+    alpha = torch.rand(batch_size, 1, 1, 1, device=DEVICE)
+    interpolates = alpha * real + (1 - alpha) * fake
+    interpolates.requires_grad_(True)
+    disc_interpolates = discriminator(interpolates)
+    gradients = torch.autograd.grad(outputs=disc_interpolates, inputs=interpolates,
+                                    grad_outputs=torch.ones_like(disc_interpolates),
+                                    create_graph=True, retain_graph=True)[0]
+    gradients = gradients.view(batch_size, -1)
+    gradient_norm = gradients.norm(2, dim=1)
+    return ((gradient_norm - 1) ** 2).mean()
+
 def train_model():
     generator, discriminator = load_models()
     vgg_loss = VGG19Loss()
@@ -264,6 +278,7 @@ def train_model():
                 print(f"Неверный размер: low_res {low_res.shape}, high_res {high_res.shape}")
                 continue
 
+            # Обучение дискриминатора с Gradient Penalty
             d_optimizer.zero_grad()
             real_output = discriminator(high_res)
             d_loss_real = bce_loss(real_output, real_label[:real_output.size(0)])
@@ -272,11 +287,15 @@ def train_model():
             fake_output = discriminator(fake_high_res.detach())
             d_loss_fake = bce_loss(fake_output, fake_label[:fake_output.size(0)])
 
-            d_loss = (d_loss_real + d_loss_fake) / 2
+            # Добавляем Gradient Penalty
+            gp = gradient_penalty(discriminator, high_res, fake_high_res.detach())
+            d_loss = (d_loss_real + d_loss_fake) / 2 + 10 * gp  # Вес GP = 10
+
             d_loss.backward()
             d_optimizer.step()
             d_loss_total += d_loss.item()
 
+            # Обучение генератора
             g_optimizer.zero_grad()
             fake_output = discriminator(fake_high_res)
             g_loss_adv = bce_loss(fake_output, real_label[:fake_output.size(0)])
@@ -288,7 +307,6 @@ def train_model():
             pixel_loss = mse_loss(fake_high_res, high_res)
             color_loss_value = color_loss(fake_high_res, high_res)
             
-            # Добавляем L1-регуляризацию
             l1_lambda = 1e-5
             l1_norm = sum(p.abs().sum() for p in generator.parameters())
             g_loss = (0.1 * g_loss_content + 0.05 * g_loss_adv + 2.5 * pixel_loss + 
