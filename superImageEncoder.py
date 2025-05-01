@@ -19,8 +19,8 @@ OUTPUT_DIR = "output_models_srgan_128to256"
 RESULTS_DIR = "results_srgan_128to256"
 BATCH_SIZE = 12
 EPOCHS = 50
-LR_G = 0.00002
-LR_D = 0.000005
+LR_G = 0.00005
+LR_D = 0.00001
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -46,27 +46,19 @@ class SuperResDataset(Dataset):
         low_res_img = Image.open(low_res_path).convert("RGB")
         high_res_img = Image.open(high_res_path).convert("RGB")
 
-        # Синхронизация случайных трансформаций
-        seed = np.random.randint(2147483647)
-        torch.manual_seed(seed)
         if self.transform_low:
             low_res_img = self.transform_low(low_res_img)
-        torch.manual_seed(seed)
         if self.transform_high:
             high_res_img = self.transform_high(high_res_img)
 
         return low_res_img, high_res_img
 
-# Трансформации (диапазон [0, 1])
+# Трансформации
 low_res_transform = transforms.Compose([
-    transforms.RandomHorizontalFlip(),
-    transforms.RandomRotation(10),
     transforms.ToTensor()
 ])
 
 high_res_transform = transforms.Compose([
-    transforms.RandomHorizontalFlip(),
-    transforms.RandomRotation(10),
     transforms.ToTensor()
 ])
 
@@ -79,7 +71,7 @@ test_high_res_img = Image.open(os.path.join(HIGH_RES_DIR, "00000.png")).convert(
 test_low_res_tensor = low_res_transform(test_low_res_img).unsqueeze(0).to(DEVICE)
 test_high_res_tensor = high_res_transform(test_high_res_img).unsqueeze(0).to(DEVICE)
 
-# Генератор (с 12 residual-блоками, двухшаговый upsampling: 128x128 -> 192x192 -> 256x256)
+# Генератор
 class Generator(nn.Module):
     def __init__(self):
         super(Generator, self).__init__()
@@ -97,10 +89,9 @@ class Generator(nn.Module):
             nn.BatchNorm2d(64)
         )
 
-        # Одношаговый upsampling (128x128 -> 256x256)
         self.upsample = nn.Sequential(
             nn.Conv2d(64, 64 * 4, kernel_size=3, padding=1),
-            nn.PixelShuffle(2),  # 128x128 -> 256x256
+            nn.PixelShuffle(2),
             nn.PReLU(),
             nn.Dropout(0.3)
         )
@@ -163,7 +154,7 @@ class Discriminator(nn.Module):
         x = x + noise
         return self.net(x)
 
-# VGG для перцептивной потери (обрезаем до conv4_4, слой 20)
+# VGG для перцептивной потери
 class VGG19Loss(nn.Module):
     def __init__(self):
         super(VGG19Loss, self).__init__()
@@ -177,7 +168,7 @@ class VGG19Loss(nn.Module):
         x = self.normalize(x)
         return self.vgg(x)
 
-# Функция для цветовой потери (HSV)
+# Цветовая потеря
 def color_loss(fake, real):
     mse_loss = nn.MSELoss()
     
@@ -208,7 +199,7 @@ def color_loss(fake, real):
     real_hsv = rgb_to_hsv_torch(real)
     return mse_loss(fake_hsv[:, 0, :, :], real_hsv[:, 0, :, :])
 
-# Функция загрузки моделей
+# Загрузка моделей
 def load_models():
     generator = Generator().to(DEVICE)
     discriminator = Discriminator().to(DEVICE)
@@ -222,7 +213,7 @@ def load_models():
         discriminator.load_state_dict(torch.load(d_path, map_location=DEVICE))
     return generator, discriminator
 
-# Функция оценки
+# Оценка
 def evaluate_model(generator, low_res_tensor, high_res_tensor):
     generator.eval()
     with torch.no_grad():
@@ -233,31 +224,24 @@ def evaluate_model(generator, low_res_tensor, high_res_tensor):
         ssim_value = ssim(high_res[0].transpose(1, 2, 0), output[0].transpose(1, 2, 0), channel_axis=2, data_range=1.0)
     return psnr_value, ssim_value
 
-# Функция для Gradient Penalty
-def gradient_penalty(discriminator, real, fake):
-    batch_size = real.size(0)
-    alpha = torch.rand(batch_size, 1, 1, 1, device=DEVICE)
-    interpolates = alpha * real + (1 - alpha) * fake
-    interpolates.requires_grad_(True)
-    disc_interpolates = discriminator(interpolates)
-    gradients = torch.autograd.grad(outputs=disc_interpolates, inputs=interpolates,
-                                    grad_outputs=torch.ones_like(disc_interpolates),
-                                    create_graph=True, retain_graph=True)[0]
-    gradients = gradients.view(batch_size, -1)
-    gradient_norm = gradients.norm(2, dim=1)
-    return ((gradient_norm - 1) ** 2).mean()
-
+# Обучение
 def train_model():
     generator, discriminator = load_models()
     vgg_loss = VGG19Loss()
 
     g_optimizer = optim.Adam(generator.parameters(), lr=LR_G, betas=(0.9, 0.999), weight_decay=1e-4)
     d_optimizer = optim.Adam(discriminator.parameters(), lr=LR_D, betas=(0.9, 0.999))
+
+    # Добавляем адаптивную скорость обучения
+    g_scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+        g_optimizer, mode='min', factor=0.5, patience=5, verbose=True
+    )
+    d_scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+        d_optimizer, mode='min', factor=0.5, patience=5, verbose=True
+    )
+
     mse_loss = nn.MSELoss()
     bce_loss = nn.BCEWithLogitsLoss()
-
-    g_scheduler = optim.lr_scheduler.ReduceLROnPlateau(g_optimizer, mode='max', factor=0.5, patience=3, verbose=True)
-    d_scheduler = optim.lr_scheduler.ReduceLROnPlateau(d_optimizer, mode='max', factor=0.5, patience=3, verbose=True)
 
     real_label = torch.ones((BATCH_SIZE, 1, 1, 1), device=DEVICE) * 0.8
     fake_label = torch.zeros((BATCH_SIZE, 1, 1, 1), device=DEVICE) + 0.2
@@ -278,7 +262,7 @@ def train_model():
                 print(f"Неверный размер: low_res {low_res.shape}, high_res {high_res.shape}")
                 continue
 
-            # Обучение дискриминатора с Gradient Penalty
+            # Обучение дискриминатора
             d_optimizer.zero_grad()
             real_output = discriminator(high_res)
             d_loss_real = bce_loss(real_output, real_label[:real_output.size(0)])
@@ -287,10 +271,7 @@ def train_model():
             fake_output = discriminator(fake_high_res.detach())
             d_loss_fake = bce_loss(fake_output, fake_label[:fake_output.size(0)])
 
-            # Добавляем Gradient Penalty
-            gp = gradient_penalty(discriminator, high_res, fake_high_res.detach())
-            d_loss = (d_loss_real + d_loss_fake) / 2 + 10 * gp  # Вес GP = 10
-
+            d_loss = (d_loss_real + d_loss_fake) / 2
             d_loss.backward()
             d_optimizer.step()
             d_loss_total += d_loss.item()
@@ -307,11 +288,7 @@ def train_model():
             pixel_loss = mse_loss(fake_high_res, high_res)
             color_loss_value = color_loss(fake_high_res, high_res)
             
-            l1_lambda = 1e-5
-            l1_norm = sum(p.abs().sum() for p in generator.parameters())
-            g_loss = (0.1 * g_loss_content + 0.05 * g_loss_adv + 2.5 * pixel_loss + 
-                     0.9 * color_loss_value + l1_lambda * l1_norm)
-            
+            g_loss = 0.1 * g_loss_content + 0.05 * g_loss_adv + 2.0 * pixel_loss + 0.7 * color_loss_value
             g_loss.backward()
             g_optimizer.step()
             
@@ -334,16 +311,21 @@ def train_model():
         avg_pixel_loss = pixel_loss_total / len(dataloader)
         avg_color_loss = color_loss_total / len(dataloader)
         
+        # Обновление скорости обучения
+        g_scheduler.step(avg_g_loss)
+        d_scheduler.step(avg_d_loss)
+
         print(f"Epoch [{epoch+1}/{EPOCHS}] завершена, Avg D Loss: {avg_d_loss:.6f}, Avg G Loss: {avg_g_loss:.6f}")
         print(f"Avg G Content: {avg_g_loss_content:.6f}, Avg G Adv: {avg_g_loss_adv:.6f}, "
               f"Avg Pixel: {avg_pixel_loss:.6f}, Avg Color: {avg_color_loss:.6f}")
+        print(f"Текущая LR генератора: {g_optimizer.param_groups[0]['lr']:.8f}, "
+              f"дискриминатора: {d_optimizer.param_groups[0]['lr']:.8f}")
 
+        # Оценка PSNR и SSIM
         psnr_value, ssim_value = evaluate_model(generator, test_low_res_tensor, test_high_res_tensor)
         print(f"PSNR (00000.png): {psnr_value:.2f}, SSIM (00000.png): {ssim_value:.4f}")
 
-        g_scheduler.step(psnr_value)
-        d_scheduler.step(psnr_value)
-
+        # Сохранение тестового изображения
         with torch.no_grad():
             test_output = generator(test_low_res_tensor)
             vutils.save_image(test_output, os.path.join(RESULTS_DIR, f"epoch_{epoch+1:02d}_00000.png"))
@@ -361,9 +343,11 @@ def train_model():
 if __name__ == "__main__":
     train_model()
 
-# v0 - PSNR (00000.png): 8.21, SSIM (00000.png): 0.0422
 # v1 - PSNR (00000.png): 10.44, SSIM (00000.png): 0.0566
 # v2 - PSNR (00000.png): 26.43, SSIM (00000.png): 0.8029
 # v3 - переходим на фото 128 -> 256, потому что на фото 64x64 очень мало деталей, поэтому дорисовывать не из чего - и так нет изначального понятия, что дорисовывать
 # v3 - PSNR (00000.png): 30.18, SSIM (00000.png): 0.8573
+# v4 - 12 блоков
 # v4 - PSNR (00000.png): 29.74, SSIM (00000.png): 0.8557
+# v5 - добавляю еще 2000 фото
+# v5 - ????
