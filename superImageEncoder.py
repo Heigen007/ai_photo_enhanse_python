@@ -7,7 +7,6 @@ import torchvision.models as models
 import torchvision.transforms as transforms
 from torch.utils.data import Dataset, DataLoader
 from PIL import Image
-import numpy as np
 from skimage.metrics import peak_signal_noise_ratio as psnr
 from skimage.metrics import structural_similarity as ssim
 import torchvision.utils as vutils
@@ -17,10 +16,10 @@ LOW_RES_DIR = "128x128/faces"
 HIGH_RES_DIR = "256x256/faces"
 OUTPUT_DIR = "output_models_srgan_128to256"
 RESULTS_DIR = "results_srgan_128to256"
-BATCH_SIZE = 12
-EPOCHS = 50
-LR_G = 0.00005
-LR_D = 0.00001
+BATCH_SIZE = 16
+EPOCHS = 30
+LR_G = 0.0001
+LR_D = 0.00005
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -81,7 +80,7 @@ class Generator(nn.Module):
         )
 
         self.res_blocks = nn.Sequential(
-            *[self._make_residual_block(64) for _ in range(12)]
+            *[self._make_residual_block(64) for _ in range(8)]
         )
 
         self.mid = nn.Sequential(
@@ -298,7 +297,7 @@ def train_model():
             pixel_loss_total += pixel_loss.item()
             color_loss_total += color_loss_value.item()
 
-            if batch_idx % 45 == 0:
+            if batch_idx % 126 == 0:
                 print(f"Epoch [{epoch+1}/{EPOCHS}], Batch [{batch_idx}/{len(dataloader)}], "
                       f"D Loss: {d_loss.item():.6f}, G Loss: {g_loss.item():.6f}, "
                       f"G Content: {g_loss_content.item():.6f}, G Adv: {g_loss_adv.item():.6f}, "
@@ -349,5 +348,6 @@ if __name__ == "__main__":
 # v3 - PSNR (00000.png): 30.18, SSIM (00000.png): 0.8573
 # v4 - 12 блоков
 # v4 - PSNR (00000.png): 29.74, SSIM (00000.png): 0.8557
-# v5 - добавляю еще 2000 фото
-# v5 - ????
+# v5 - добавляю еще 2000 фото, сглаживаю обучение, возвращаю 8 блоков
+# v5 - ???? 6 эпох + 2 эпохи + 5 эпох
+# v5 - PSNR (00000.png): 29.31, SSIM (00000.png): 0.8573
