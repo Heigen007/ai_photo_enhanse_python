@@ -3,7 +3,7 @@ import torch
 import torchvision.transforms as transforms
 import torchvision.utils as vutils
 from PIL import Image
-from superImageEncoder import Generator  # путь к модели
+from src.models.superImageEncoder import Generator  # путь к модели
 from skimage.metrics import peak_signal_noise_ratio as psnr
 from skimage.metrics import structural_similarity as ssim
 import time

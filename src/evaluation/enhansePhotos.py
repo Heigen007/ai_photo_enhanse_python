@@ -3,7 +3,7 @@ import torch
 import torchvision.transforms as transforms
 import torchvision.utils as vutils
 from PIL import Image
-from superImageEncoder import Generator  # Подключи свою модель
+from src.models.superImageEncoder import Generator  # Подключи свою модель
 
 # Настройки
 LOW_RES_DIR = "128x128/faces"

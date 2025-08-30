@@ -20,7 +20,7 @@ os.makedirs(ENCODED_DIR, exist_ok=True)
 dataset = [f for f in os.listdir(IMAGE_DIR) if f.endswith(('jpg', 'png'))]
 
 def load_model():
-    from aiEncoder import Autoencoder  # Импорт из вашего файла aiEncoder.py
+    from src.models.aiEncoder import Autoencoder  # Импорт из вашего файла aiEncoder.py
     model = Autoencoder()
     if os.path.exists("autoencoder.pth"):
         print("Загружаем модель...")
